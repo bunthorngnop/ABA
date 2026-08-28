@@ -1,0 +1,17 @@
+.env
+.env.local
+.env.*.local
+.env copy*
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+data/*.sqlite3
+data/*.sqlite3-*
+logs/*.log*
+*.sqlite3
+*.sqlite3-*
+*.session
+*.session-journal
+*.session-shm
+*.session-wal

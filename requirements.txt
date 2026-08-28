@@ -1,0 +1,4 @@
+python-dotenv==1.1.1
+Telethon==1.44.0
+edge-tts==7.2.3
+pygame==2.6.1
