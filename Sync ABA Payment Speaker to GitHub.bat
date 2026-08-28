@@ -26,8 +26,9 @@ if errorlevel 1 (
   goto :failed
 )
 
-git remote get-url origin >nul 2>nul
-if errorlevel 1 (
+set "ABA_CURRENT_REMOTE="
+for /f "delims=" %%R in ('git config --get remote.origin.url 2^>nul') do set "ABA_CURRENT_REMOTE=%%R"
+if not defined ABA_CURRENT_REMOTE (
   echo.
   echo Create an EMPTY private GitHub repository first - no README or license.
   set /p "ABA_REPO_URL=Paste its GitHub repository URL: "
@@ -35,7 +36,12 @@ if errorlevel 1 (
     echo ERROR: No repository URL was entered.
     goto :failed
   )
-  git remote add origin "%ABA_REPO_URL%"
+  git remote | findstr /x /i "origin" >nul
+  if errorlevel 1 (
+    git remote add origin "!ABA_REPO_URL!"
+  ) else (
+    git remote set-url origin "!ABA_REPO_URL!"
+  )
   if errorlevel 1 goto :failed
 )
 

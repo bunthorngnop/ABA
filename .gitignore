@@ -5,6 +5,7 @@
 .venv/
 __pycache__/
 .pytest_cache/
+.sync-*-test*
 *.py[cod]
 data/*.sqlite3
 data/*.sqlite3-*
