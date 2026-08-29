@@ -138,7 +138,7 @@ class TelegramListener:
         announcement = build_announcement(result)
         self.state_callback("payment", {
             "amount": str(result.amount), "currency": result.currency, "payer": result.sender_name,
-            "bank": result.bank, "announcement": announcement, "event_key": key,
+            "bank": result.display_bank, "announcement": announcement, "event_key": key,
         })
         self.announce(announcement, key)
 

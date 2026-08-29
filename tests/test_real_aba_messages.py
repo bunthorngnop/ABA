@@ -12,7 +12,7 @@ def test_exact_real_khr_sample():
         Decimal("2000"), "KHR", "VAN VET", "ABA", "ABA PAY")
     assert result.valid_incoming_payment
     spoken = build_announcement(result)
-    assert spoken == "បានទទួលប្រាក់ ២ ពាន់រៀល ពីឈ្មោះ VAN VET, ធនាគារ ABA។"
+    assert spoken == "បានទទួលប្រាក់ ២ ពាន់រៀល ពីឈ្មោះ VAN VET, ធនាគារ អេ ប៊ី អេ។"
     for private in ("*571", "Aug 28", "Wing Mart R", "S.NHEL", "Trx. ID", "APV"):
         assert private not in spoken
 
@@ -23,5 +23,5 @@ def test_exact_real_usd_sample():
         Decimal("5.00"), "USD", "NHEAN MONYRACHANA", "ACLEDA", "ABA KHQR")
     assert result.valid_incoming_payment
     spoken = build_announcement(result)
-    assert spoken == "បានទទួលប្រាក់ ៥ ដុល្លារ ពីឈ្មោះ NHEAN MONYRACHANA, ធនាគារ ACLEDA។"
+    assert spoken == "បានទទួលប្រាក់ ៥ ដុល្លារ ពីឈ្មោះ NHEAN MONYRACHANA, ធនាគារ អេស៊ីលីដា។"
     assert "S.NHEL" not in spoken and "*298" not in spoken and "APV" not in spoken

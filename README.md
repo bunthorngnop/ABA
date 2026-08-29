@@ -1,6 +1,6 @@
 # ABA Payment Speaker Bot — Version 1
 
-This Windows application monitors one Telegram group through your own authenticated Telegram account, validates only the two confirmed ABA/PayWay notification formats, and announces valid incoming payments in Khmer. Telegram remains the authoritative payment record. Uncertain events stay silent.
+This Windows application monitors configured Telegram groups through your own authenticated Telegram account, validates the confirmed ABA/PayWay incoming-payment grammar, and announces valid incoming payments in Khmer. Telegram remains the authoritative payment record. Uncertain events stay silent.
 
 ## Operational dashboard
 
@@ -26,6 +26,12 @@ The listener does not send messages, join groups, modify chats, mark setup IDs a
 - Internet access for Telegram and the Microsoft Khmer neural voice.
 - A Telegram account that is already a member of the payment group.
 - Working speakers.
+
+## One-click setup on another PC
+
+Clone the private repository into a normal local folder such as `C:\ABA Payment Speaker`—never inside Dropbox—then double-click `SET UP ON THIS PC.bat`. It verifies 64-bit Python 3.12, creates this PC's `.venv`, installs the pinned dependencies, preserves or creates the private `.env`, and runs the complete regression suite.
+
+The setup script does not start Telegram monitoring. Configure this PC's `.env`, make sure the speaker application is completely closed on every other PC, and then use `Start ABA Payment Speaker.bat`.
 
 Install the project once from a VS Code terminal:
 
@@ -131,6 +137,12 @@ Live commissioning also verified these narrow PayWay variations:
 - merchant text followed directly by `. Trx. ID` without a later staff `by ...` fragment;
 - an optional `Remark:` clause between merchant text and transaction metadata;
 - `ABA KHQR (PPCBank)`, explicitly normalized to spoken bank `PPCBank`.
+
+The deterministic institution registry also recognizes the production-observed exact labels and codes `KB PRASAC Bank Plc`, `Cambodia Post Bank Plc`, `Sathapana Bank Plc`, `ACLBKHPPXXX`, and `CPBPKHPPXXX`. Bank display names remain concise while speech uses the approved Khmer bank name. Matching is exact after harmless case, spacing, and period/comma normalization; there is no fuzzy matching.
+
+An unfamiliar `ABA KHQR (LABEL)` does not invalidate an otherwise securely authorized, structurally valid incoming payment. It appears as `OTHER BANK`, and the spoken announcement safely omits the bank clause. The application never guesses a bank or foreign payment network. New cross-border aliases can be added to the registry only after their exact PayWay label or code is verified.
+
+Payer names support validated Unicode letters, including Khmer names. USD cents are preserved with `Decimal` and spoken naturally, for example `$1.25` as `១ ដុល្លារ ២៥ សេន`; whole-dollar `.00` values keep the established shorter form.
 
 These extensions came from actual observed notifications. Other unverified formats still remain silent.
 

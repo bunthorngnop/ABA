@@ -20,4 +20,8 @@ class PaymentResult:
     valid_incoming_payment: bool = False
     status: ParserStatus = ParserStatus.REJECTED
     reason_if_rejected: Optional[str] = None
-
+    raw_bank_label: Optional[str] = None
+    canonical_bank: Optional[str] = None
+    display_bank: Optional[str] = None
+    spoken_bank: Optional[str] = None
+    institution_status: str = "UNMAPPED"

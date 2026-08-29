@@ -229,8 +229,8 @@ class Dashboard:
     def _load(self, text: str) -> None: self.test_input.delete("1.0", "end"); self.test_input.insert("1.0", text)
 
     def _parse_test(self) -> None:
-        result = parse_payment(self.test_input.get("1.0", "end").strip()); announcement = build_announcement(result) if result.status == ParserStatus.VALID else ""; self.last_test_announcement = announcement
-        payload = {"amount": str(result.amount) if result.amount is not None else None, "currency": result.currency, "sender_name": result.sender_name, "bank": result.bank, "payment_channel": result.payment_channel, "valid_incoming_payment": result.valid_incoming_payment, "status": result.status.value, "reason": result.reason_if_rejected, "announcement": announcement}
+        result = parse_payment(self.test_input.get("1.0", "end").strip(), allow_test_fixture=True); announcement = build_announcement(result) if result.status == ParserStatus.VALID else ""; self.last_test_announcement = announcement
+        payload = {"amount": str(result.amount) if result.amount is not None else None, "currency": result.currency, "sender_name": result.sender_name, "raw_bank_label": result.raw_bank_label, "canonical_bank": result.canonical_bank, "display_bank": result.display_bank, "spoken_bank": result.spoken_bank, "institution_status": result.institution_status, "payment_channel": result.payment_channel, "valid_incoming_payment": result.valid_incoming_payment, "status": result.status.value, "reason": result.reason_if_rejected, "announcement": announcement}
         self.test_output.configure(state="normal"); self.test_output.delete("1.0", "end"); self.test_output.insert("1.0", json.dumps(payload, ensure_ascii=False, indent=2)); self.test_output.configure(state="disabled")
 
     def _speak_parsed(self) -> None:
@@ -288,7 +288,7 @@ class Dashboard:
         self.values["commissioning"].set("Expected source detected. Review and click Verify & Save." if display.get("expected_source_detected") else "Group discovered. Save its chat ID, then wait for @PayWayByABA_bot."); self._refresh_commissioning_controls()
 
     def _apply_payment(self, data: dict[str, object]) -> None:
-        self.current_payment_key = str(data.get("event_key") or "") or None; self.values["amount"].set(format_payment_amount(data.get("amount"), data.get("currency"))); self.values["payer"].set(str(data.get("payer") or "UNKNOWN SENDER")); self.values["bank"].set(str(data.get("bank") or "NOT AVAILABLE")); self._set_announcement_state("QUEUED"); self._pulse_amount(0)
+        self.current_payment_key = str(data.get("event_key") or "") or None; self.values["amount"].set(format_payment_amount(data.get("amount"), data.get("currency"))); self.values["payer"].set(str(data.get("payer") or "UNKNOWN SENDER")); self.values["bank"].set(str(data.get("bank") or "OTHER BANK")); self._set_announcement_state("QUEUED"); self._pulse_amount(0)
 
     def _set_announcement_state(self, status: str) -> None:
         label, color = announcement_label(status); self.values["announcement"].set(label); self.announcement_label.configure(fg=COLORS[color])
@@ -313,9 +313,9 @@ class Dashboard:
             timestamp = str(row.get("received_at") or "")
             try: shown_time = datetime.fromisoformat(timestamp).astimezone().strftime("%I:%M %p")
             except (ValueError, TypeError): shown_time = "—"
-            self.history.insert("", "end", values=(format_payment_amount(row.get("amount"), row.get("currency")), row.get("sender_name") or "—", row.get("bank") or "—", shown_time))
+            self.history.insert("", "end", values=(format_payment_amount(row.get("amount"), row.get("currency")), row.get("sender_name") or "—", row.get("bank") or "OTHER BANK", shown_time))
         if self.current_payment_key is None and rows:
-            latest = rows[0]; self.current_payment_key = str(latest.get("event_key") or "") or None; self.values["amount"].set(format_payment_amount(latest.get("amount"), latest.get("currency"))); self.values["payer"].set(str(latest.get("sender_name") or "UNKNOWN SENDER")); self.values["bank"].set(str(latest.get("bank") or "NOT AVAILABLE")); self._set_announcement_state("SPOKEN")
+            latest = rows[0]; self.current_payment_key = str(latest.get("event_key") or "") or None; self.values["amount"].set(format_payment_amount(latest.get("amount"), latest.get("currency"))); self.values["payer"].set(str(latest.get("sender_name") or "UNKNOWN SENDER")); self.values["bank"].set(str(latest.get("bank") or "OTHER BANK")); self._set_announcement_state("SPOKEN")
 
     def _refresh_health(self) -> None:
         for name in ("telegram", "speaker", "source"):
