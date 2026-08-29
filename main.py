@@ -52,12 +52,16 @@ def main() -> None:
             store.set_announcement_status(item.event_key, status)
         if dashboard:
             dashboard.publish("speaker", "Ready" if status == "SPOKEN" else status.title())
+            if item.event_key:
+                dashboard.publish("announcement_status", {"event_key": item.event_key, "status": status})
 
     audio = AudioQueue(EdgeKhmerSpeech(settings.tts_voice, settings.tts_volume), audio_status)
     dashboard = Dashboard(
         lambda text: audio.enqueue(text),
         audio.set_muted,
         store.announced_today,
+        today_summary=store.today_summary,
+        recent_payments=store.recent_announced,
         save_settings=lambda updates: update_env_file(".env", updates),
         expected_username=settings.expected_aba_username,
         configured_chat_ids=settings.allowed_chat_ids,

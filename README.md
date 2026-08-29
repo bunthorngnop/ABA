@@ -2,6 +2,18 @@
 
 This Windows application monitors one Telegram group through your own authenticated Telegram account, validates only the two confirmed ABA/PayWay notification formats, and announces valid incoming payments in Khmer. Telegram remains the authoritative payment record. Uncertain events stay silent.
 
+## Operational dashboard
+
+The primary screen is a dark, shop-counter dashboard built around the latest validated payment:
+
+- the received KHR or USD amount is the largest element;
+- the validated payer name appears in blue;
+- the normalized originating bank appears in violet;
+- `ANNOUNCED` appears only after the audio queue reports successful speech;
+- system readiness, spoken-only daily totals, and the latest five successfully announced payments are shown using privacy-safe fields.
+
+Telegram commissioning IDs and the safe parser test remain available under **Settings & Diagnostics**, away from the operational display. No raw Telegram payload, account fragment, transaction ID, APV, merchant, operator, credential, or session data is shown in payment history.
+
 ## What changed
 
 Telegram did not expose Bot-to-Bot Communication Mode for the original receiving bot, so the Bot API listener was replaced with a read-only Telethon user-session listener. The parser, Khmer number conversion, bank normalization, SQLite duplicate protection, audio queue, TTS, dashboard, and safety rules remain unchanged.

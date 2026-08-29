@@ -68,6 +68,39 @@ class PaymentStore:
         ).fetchone()
         return int(row["n"])
 
+    def today_summary(self) -> dict[str, object]:
+        """Return local-day spoken-payment totals without combining currencies."""
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT currency, COUNT(*) AS payment_count,
+                          COALESCE(SUM(CAST(amount AS NUMERIC)), 0) AS total
+                   FROM events
+                   WHERE date(received_at, 'localtime') = date('now', 'localtime')
+                     AND parser_status='VALID' AND announcement_status='SPOKEN'
+                   GROUP BY currency"""
+            ).fetchall()
+        totals = {"count": 0, "KHR": "0", "USD": "0.00"}
+        for row in rows:
+            currency = row["currency"]
+            if currency not in {"KHR", "USD"}:
+                continue
+            totals["count"] += int(row["payment_count"])
+            totals[currency] = str(row["total"])
+        return totals
+
+    def recent_announced(self, limit: int = 5) -> list[dict[str, object]]:
+        """Return privacy-safe fields for the latest successfully spoken payments."""
+        safe_limit = max(1, min(int(limit), 20))
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT event_key, amount, currency, sender_name, bank, received_at
+                   FROM events
+                   WHERE parser_status='VALID' AND announcement_status='SPOKEN'
+                   ORDER BY received_at DESC LIMIT ?""",
+                (safe_limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def close(self) -> None:
         with self._lock:
             self._connection.close()
