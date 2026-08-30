@@ -61,7 +61,7 @@ def main() -> None:
         audio.set_muted,
         store.announced_today,
         today_summary=store.today_summary,
-        recent_payments=store.recent_announced,
+        recent_payments=store.announced_today_rows,
         save_settings=lambda updates: update_env_file(".env", updates),
         expected_username=settings.expected_aba_username,
         configured_chat_ids=settings.allowed_chat_ids,

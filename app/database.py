@@ -101,6 +101,20 @@ class PaymentStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def announced_today_rows(self, limit: int = 1000) -> list[dict[str, object]]:
+        """Return privacy-safe successfully spoken payments from the current local day."""
+        safe_limit = max(1, min(int(limit), 1000))
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT event_key, amount, currency, sender_name, bank, received_at
+                   FROM events
+                   WHERE date(received_at, 'localtime') = date('now', 'localtime')
+                     AND parser_status='VALID' AND announcement_status='SPOKEN'
+                   ORDER BY received_at DESC LIMIT ?""",
+                (safe_limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def close(self) -> None:
         with self._lock:
             self._connection.close()

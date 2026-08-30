@@ -7,10 +7,15 @@ This Windows application monitors configured Telegram groups through your own au
 The primary screen is a dark, shop-counter dashboard built around the latest validated payment:
 
 - the received KHR or USD amount is the largest element;
+- the large local clock stays centered above the payment card, with a readable date beneath it;
+- the shop header uses the two-line Khmer title `វីង វណ្ណា-ស្រីមុិច` / `ប្រព័ន្ធទទួលប្រាក់` in Khmer OS Muol Light when installed, with safe Khmer-capable fallbacks;
+- KHR amounts use success green while USD amounts use a distinct warm gold;
 - the validated payer name appears in blue;
 - the normalized originating bank appears in violet;
 - `ANNOUNCED` appears only after the audio queue reports successful speech;
-- system readiness, spoken-only daily totals, and the latest five successfully announced payments are shown using privacy-safe fields.
+- system readiness, spoken-only daily totals, and a three-row recent-payment viewport are shown using privacy-safe fields;
+- when today has more than three successfully announced payments, the larger-text recent-payment area scrolls through up to 1,000 current-day records, newest first; complete KHR rows are green, complete USD rows are gold, and sender names are bold;
+- the dashboard adapts to shorter displays by tightening sender/bank cards and, only on very short screens, collapsing the secondary status column so the received amount remains visible.
 
 Telegram commissioning IDs and the safe parser test remain available under **Settings & Diagnostics**, away from the operational display. No raw Telegram payload, account fragment, transaction ID, APV, merchant, operator, credential, or session data is shown in payment history.
 

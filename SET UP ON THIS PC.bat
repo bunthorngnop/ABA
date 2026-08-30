@@ -78,7 +78,7 @@ if not exist ".env" (
 if exist "requirements-dev.txt" (
   echo.
   echo Running the complete regression suite...
-  ".venv\Scripts\python.exe" -m pytest -q
+  ".venv\Scripts\python.exe" -m pytest -q -p no:cacheprovider --basetemp "%TEMP%\aba-payment-speaker-tests-%RANDOM%-%RANDOM%"
   if errorlevel 1 (
     echo ERROR: Tests failed. Do not start production operation.
     goto :failed
