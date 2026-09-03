@@ -1,4 +1,11 @@
-from app.dashboard import amount_color, announcement_label, component_health, format_payment_amount, responsive_layout_mode
+from app.dashboard import (
+    amount_color,
+    announcement_label,
+    component_health,
+    format_payment_amount,
+    preferred_secondary_monitor,
+    responsive_layout_mode,
+)
 
 
 def test_khr_and_usd_amounts_have_large_display_format():
@@ -27,6 +34,13 @@ def test_responsive_layout_modes_protect_short_displays():
     assert responsive_layout_mode(900) == "normal"
     assert responsive_layout_mode(720) == "compact"
     assert responsive_layout_mode(600) == "short"
+
+
+def test_secondary_monitor_is_preferred_over_primary():
+    primary = {"left": 0, "top": 0, "right": 1920, "bottom": 1080, "primary": True}
+    secondary = {"left": 1920, "top": 0, "right": 3200, "bottom": 1024, "primary": False}
+    assert preferred_secondary_monitor([primary, secondary]) == secondary
+    assert preferred_secondary_monitor([primary]) is None
 
 
 def test_announcement_state_never_claims_success_early():

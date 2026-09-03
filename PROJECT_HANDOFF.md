@@ -226,6 +226,24 @@ One-click files:
 - `PUSH TO GITHUB.bat`: tests and invokes the secret-safe commit/push workflow.
 - `PULL FROM GITHUB.bat`: refuses a running app or dirty worktree, pulls with `--ff-only`, refreshes dependencies, and tests.
 
+PC3 Windows startup configuration (local operating-system state, not synchronized by GitHub):
+
+- Task Scheduler task: `ABA Payment Speaker`;
+- trigger: current user logon;
+- action: `C:\ABA Payment Speaker\.venv\Scripts\pythonw.exe "C:\ABA Payment Speaker\main.py"`;
+- working directory: `C:\ABA Payment Speaker`;
+- configured to continue on battery power with no execution time limit.
+
+The task starts the dashboard automatically after this Windows user signs in. It does not solve cross-PC coordination: every other speaker PC must remain closed to prevent duplicate announcements.
+
+Dashboard display placement:
+
+- startup checks the active Windows monitor work areas for up to approximately eight seconds;
+- when an active non-primary monitor is available, the dashboard moves to it and maximizes;
+- if multiple non-primary displays exist, it selects the one physically closest to the primary display;
+- if no secondary monitor becomes available, the dashboard opens at normal 1180×800 size, centered within the primary monitor where possible;
+- monitor placement failure never stops payment monitoring.
+
 Git author configured for this repository during setup:
 
 ```text
@@ -321,3 +339,34 @@ This mechanism applies when Codex is actively working in this repository. It can
 
 - Confirmed `SET UP ON THIS PC.bat` prepares a normal local clone for operation: it validates 64-bit Python 3.12, creates or repairs `.venv`, installs pinned dependencies, preserves an existing `.env` or creates one from `.env.example`, and runs the full tests.
 - It refuses setup from inside Dropbox and does not start Telegram monitoring or the payment speaker; the operator must close other active PCs and then use `Start ABA Payment Speaker.bat`.
+
+### 2026-08-30 — GitHub synchronization confirmed
+
+- Operator confirmed the one-click sync completed successfully and the source code reached GitHub.
+- Secrets, Telegram sessions, virtual environments, logs, and databases remained excluded from the upload as required.
+
+### 2026-09-02 — Windows automatic startup enabled on PC3
+
+- User requested automatic Windows startup and asked that the working speaker remain running.
+- Ran the complete installed regression suite from `C:\ABA Payment Speaker`: 110 tests passed.
+- Registered the per-user Task Scheduler task `ABA Payment Speaker` to start the installed application at Windows logon with the correct working directory.
+- Removed the temporary Startup-folder shortcut created during testing so only one automatic-start mechanism remains.
+- Closed the two extra test-launched application trees and verified the scheduled instance remained `Running`; its dashboard window was responsive.
+- No payment-processing, Telegram authorization, parser, database, duplicate-protection, security, or Khmer TTS code was changed.
+
+### 2026-09-02 — Secondary-screen startup placement
+
+- User approved automatic secondary-display placement after discussing the behavior; the requested fallback is normal size on the primary monitor, not application failure.
+- Updated `app/dashboard.py` to retry secondary-monitor discovery, maximize on the closest active non-primary monitor, and fall back safely to a normal primary-monitor window.
+- Added monitor-selection regression coverage in `tests/test_dashboard_ui.py` and documented the behavior in `README.md`.
+- Complete working-tree suite passed with 111 tests.
+- GUI smoke test detected PC3's 1366×728 secondary work area below the primary display and verified the dashboard entered the maximized state at that secondary monitor's coordinates.
+- Simulated missing-secondary smoke test verified the normal 1180×800 fallback centered on the primary display.
+- Deployed the change to `C:\ABA Payment Speaker`; the installed suite passed all 111 tests.
+- Restarted the scheduled production instance and verified one normal two-process Python launcher/interpreter tree, a responsive `ABA Payment Speaker` window, maximized state, and window bounds on the secondary display. The application was left running.
+
+### 2026-09-03 — Unified Lab integration proposed
+
+- User asked how to brief Codex on the Main PC about integrating ABA Payment Speaker with an existing Unified Lab project.
+- Recommended an inspect-and-plan-first integration: read this handoff and both projects, preserve ABA source authorization and payment safeguards, avoid duplicate Telegram listeners, keep private runtime data local, define a narrow event/status interface, and wait for approval before implementation.
+- No Unified Lab integration or application behavior change was implemented in this turn.

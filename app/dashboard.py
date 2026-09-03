@@ -1,7 +1,10 @@
 import json
+import os
 import queue
 import tkinter as tk
 import tkinter.font as tkfont
+from ctypes import Structure, WINFUNCTYPE, byref, sizeof, windll
+from ctypes.wintypes import BOOL, DWORD, HDC, HMONITOR, LPARAM, RECT
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from tkinter import messagebox, scrolledtext, simpledialog, ttk
@@ -22,6 +25,49 @@ COLORS = {
     "amber": "#FBBF24", "usd": "#F6C85F", "usd_flash": "#FFF0B8",
     "red": "#FB7185", "button": "#22304A",
 }
+
+
+class _MonitorInfo(Structure):
+    _fields_ = (("cbSize", DWORD), ("rcMonitor", RECT), ("rcWork", RECT), ("dwFlags", DWORD))
+
+
+def active_monitors() -> list[dict[str, int | bool]]:
+    """Return active Windows monitor work areas without adding a dependency."""
+    if os.name != "nt":
+        return []
+    monitors: list[dict[str, int | bool]] = []
+    callback_type = WINFUNCTYPE(BOOL, HMONITOR, HDC, RECT, LPARAM)
+
+    def collect(handle, _dc, _rect, _data):
+        info = _MonitorInfo()
+        info.cbSize = sizeof(_MonitorInfo)
+        if windll.user32.GetMonitorInfoW(handle, byref(info)):
+            area = info.rcWork
+            monitors.append({
+                "left": area.left, "top": area.top, "right": area.right, "bottom": area.bottom,
+                "primary": bool(info.dwFlags & 1),
+            })
+        return True
+
+    callback = callback_type(collect)
+    windll.user32.EnumDisplayMonitors(0, 0, callback, 0)
+    return monitors
+
+
+def preferred_secondary_monitor(monitors: list[dict[str, int | bool]]) -> Optional[dict[str, int | bool]]:
+    """Choose the active non-primary monitor closest to the primary display."""
+    primary = next((monitor for monitor in monitors if monitor["primary"]), None)
+    secondary = [monitor for monitor in monitors if not monitor["primary"]]
+    if not secondary:
+        return None
+    if primary is None:
+        return secondary[0]
+    primary_center = ((int(primary["left"]) + int(primary["right"])) / 2,
+                      (int(primary["top"]) + int(primary["bottom"])) / 2)
+    return min(secondary, key=lambda monitor: (
+        ((int(monitor["left"]) + int(monitor["right"])) / 2 - primary_center[0]) ** 2
+        + ((int(monitor["top"]) + int(monitor["bottom"])) / 2 - primary_center[1]) ** 2
+    ))
 
 
 def format_payment_amount(amount: object, currency: object) -> str:
@@ -125,6 +171,7 @@ class Dashboard:
         }.items()}
         self._build()
         self.root.bind("<Configure>", self._schedule_responsive_layout)
+        self.root.after(150, lambda: self._place_startup_window(8))
         self._refresh_operational_data()
         self._tick_clock()
         self.root.after(200, self._drain_events)
@@ -308,6 +355,29 @@ class Dashboard:
         if self._layout_after_id is not None:
             self.root.after_cancel(self._layout_after_id)
         self._layout_after_id = self.root.after(80, self._apply_responsive_layout)
+
+    def _place_startup_window(self, attempts_left: int) -> None:
+        monitors = active_monitors()
+        target = preferred_secondary_monitor(monitors)
+        if target is not None:
+            left, top = int(target["left"]), int(target["top"])
+            width = max(900, int(target["right"]) - left)
+            height = max(600, int(target["bottom"]) - top)
+            self.root.state("normal")
+            self.root.geometry(f"{width}x{height}+{left}+{top}")
+            self.root.update_idletasks()
+            self.root.state("zoomed")
+            return
+        if attempts_left > 1:
+            self.root.after(1000, lambda: self._place_startup_window(attempts_left - 1))
+            return
+        primary = next((monitor for monitor in monitors if monitor["primary"]), None)
+        self.root.state("normal")
+        if primary is not None:
+            width, height = 1180, 800
+            left = int(primary["left"]) + max(0, (int(primary["right"]) - int(primary["left"]) - width) // 2)
+            top = int(primary["top"]) + max(0, (int(primary["bottom"]) - int(primary["top"]) - height) // 2)
+            self.root.geometry(f"{width}x{height}+{left}+{top}")
 
     def _apply_responsive_layout(self) -> None:
         self._layout_after_id = None
