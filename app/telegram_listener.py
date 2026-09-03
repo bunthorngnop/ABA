@@ -2,6 +2,7 @@ import asyncio
 import logging
 import queue
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -139,6 +140,7 @@ class TelegramListener:
         self.state_callback("payment", {
             "amount": str(result.amount), "currency": result.currency, "payer": result.sender_name,
             "bank": result.display_bank, "announcement": announcement, "event_key": key,
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
         })
         self.announce(announcement, key)
 

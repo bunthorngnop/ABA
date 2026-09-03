@@ -3,6 +3,7 @@
 .env.*.local
 .env copy*
 .venv/
+.venv.stale-*/
 __pycache__/
 .pytest_cache/
 .sync-*-test*

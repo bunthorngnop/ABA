@@ -7,6 +7,7 @@ from app.audio_queue import AudioItem, AudioQueue
 from app.config import load_settings, update_env_file
 from app.dashboard import Dashboard
 from app.database import PaymentStore
+from app.integration_api import IntegrationRuntimeStatus, IntegrationServer
 from app.single_instance import SingleInstanceLock
 from app.telegram_listener import TelegramListener
 from app.tts import EdgeKhmerSpeech
@@ -58,6 +59,8 @@ def _run_application() -> int:
     configure_logging((settings.telegram_api_hash, settings.telegram_phone))
     store = PaymentStore(settings.database_path)
     dashboard = None
+    integration_status = IntegrationRuntimeStatus(settings.production_ready)
+    integration_server = build_integration_server(settings, store, integration_status)
 
     def audio_status(item: AudioItem, status: str) -> None:
         if item.event_key:
@@ -66,6 +69,7 @@ def _run_application() -> int:
             dashboard.publish("speaker", "Ready" if status == "SPOKEN" else status.title())
             if item.event_key:
                 dashboard.publish("announcement_status", {"event_key": item.event_key, "status": status})
+        integration_status.update("speaker", "Ready" if status == "SPOKEN" else status)
 
     audio = AudioQueue(EdgeKhmerSpeech(settings.tts_voice, settings.tts_volume), audio_status)
     dashboard = Dashboard(
@@ -80,13 +84,37 @@ def _run_application() -> int:
         configured_sender_id=settings.allowed_aba_sender_id,
         diagnostic_mode=settings.diagnostic_mode,
     )
-    listener = TelegramListener(settings, store, lambda text, key: audio.enqueue(text, key), dashboard.publish)
+    def publish(topic: str, value: object) -> None:
+        integration_status.update(topic, value)
+        dashboard.publish(topic, value)
+
+    listener = TelegramListener(settings, store, lambda text, key: audio.enqueue(text, key), publish)
+    if integration_server and not integration_server.start():
+        integration_status.update("integration", "OFFLINE")
     listener.start()
     try:
         dashboard.run()
     finally:
-        listener.stop(); audio.stop(); store.close()
+        listener.stop(); audio.stop()
+        if integration_server:
+            integration_server.stop()
+        store.close()
     return 0
+
+
+def build_integration_server(settings, store, status):
+    if not settings.integration_enabled:
+        return None
+    if len(settings.integration_token) < 32 or not 1 <= settings.integration_port <= 65535:
+        logging.getLogger(__name__).warning("ABA integration API disabled because local configuration is invalid")
+        return None
+    try:
+        return IntegrationServer(
+            settings.integration_host, settings.integration_port, settings.integration_token, store, status,
+        )
+    except ValueError:
+        logging.getLogger(__name__).warning("ABA integration API disabled because loopback configuration is invalid")
+        return None
 
 
 if __name__ == "__main__":

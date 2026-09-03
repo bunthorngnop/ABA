@@ -171,6 +171,33 @@ Microsoft voice `km-KH-SreymomNeural` is used through `edge-tts`, so speech requ
 - A SHA-256 key based on chat ID and message ID is reserved before speech, suppressing retries and duplicates across restarts.
 - The fail-safe tradeoff favors one missed announcement after a rare crash over duplicate speech.
 
+## Unified AI Lab integration
+
+The optional integration API is read-only, bearer-authenticated, and restricted to `127.0.0.1`/loopback. It exports only an opaque event ID, authoritative timestamp, integer minor-unit amount, currency, privacy-approved sender display name, safe bank display/mapping status, and announcement status. It never exports raw Telegram messages, Telegram identifiers, usernames, account fragments, merchant data, transaction metadata, credentials, sessions, or diagnostics.
+
+The API reads already-approved database state and is not in the Telegram, parser, duplicate-reservation, dashboard, or Khmer TTS critical path. Bind or configuration failure disables only integration; payment monitoring continues. The standalone dashboard and startup method remain authoritative.
+
+Private `.env` variables:
+
+```dotenv
+ABA_INTEGRATION_ENABLED=false
+ABA_INTEGRATION_HOST=127.0.0.1
+ABA_INTEGRATION_PORT=8766
+ABA_INTEGRATION_TOKEN=private-local-token-at-least-32-characters
+```
+
+Endpoints:
+
+- `GET /integration/v1/status`
+- `GET /integration/v1/health`
+- `GET /integration/v1/events?after={opaque_cursor}&limit=50`
+
+Do not expose this port to LAN, Tailscale, router forwarding, or a browser. Unified is only a secondary display/cache and never becomes payment authority.
+
+At process startup a Windows named mutex is acquired before any Telegram initialization. A second local instance exits with `ABA Payment Speaker is already running.` This does not coordinate multiple PCs; the rule **ONLY ONE ABA PAYMENT SPEAKER PC ACTIVE AT A TIME** still applies.
+
+Rollback: set `ABA_INTEGRATION_ENABLED=false` and restart ABA. Telegram monitoring, payment parsing, duplicate protection, Khmer TTS, and the standalone dashboard remain unchanged.
+
 ## Run tests
 
 ```powershell

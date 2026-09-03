@@ -51,6 +51,10 @@ class Settings:
     database_path: Path
     tts_voice: str
     tts_volume: str
+    integration_enabled: bool = False
+    integration_host: str = "127.0.0.1"
+    integration_port: int = 8766
+    integration_token: str = ""
 
     @property
     def production_ready(self) -> bool:
@@ -112,6 +116,13 @@ def load_settings(env_file: str = ".env") -> Settings:
     session_value = os.path.expandvars(os.getenv("TELEGRAM_SESSION_PATH", "").strip())
     default_database = Path(os.getenv("LOCALAPPDATA", "data")) / "ABA Payment Speaker" / "aba_payment_speaker.sqlite3"
     database_value = os.path.expandvars(os.getenv("DATABASE_PATH", "").strip())
+    integration_enabled = os.getenv("ABA_INTEGRATION_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+    integration_host = os.getenv("ABA_INTEGRATION_HOST", "127.0.0.1").strip()
+    try:
+        integration_port = int(os.getenv("ABA_INTEGRATION_PORT", "8766"))
+    except ValueError:
+        integration_port = 0
+    integration_token = os.getenv("ABA_INTEGRATION_TOKEN", "").strip()
     return Settings(
         telegram_api_id=_integer("TELEGRAM_API_ID"),
         telegram_api_hash=os.getenv("TELEGRAM_API_HASH", "").strip(),
@@ -124,4 +135,8 @@ def load_settings(env_file: str = ".env") -> Settings:
         database_path=Path(database_value) if database_value else default_database,
         tts_voice=os.getenv("TTS_VOICE", "km-KH-SreymomNeural"),
         tts_volume=os.getenv("TTS_VOLUME", "+0%"),
+        integration_enabled=integration_enabled,
+        integration_host=integration_host,
+        integration_port=integration_port,
+        integration_token=integration_token,
     )

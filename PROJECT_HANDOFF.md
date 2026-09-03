@@ -49,6 +49,11 @@ Important modules:
 - `app/tts.py`: Microsoft Khmer neural voice through `edge-tts` and pygame.
 - `app/dashboard.py`: Tkinter operational dashboard and safe diagnostics.
 - `main.py`: component wiring and privacy-safe logging.
+- `app/single_instance.py`: Windows named mutex acquired before Telegram startup.
+- `app/integration_contract.py`: strict privacy-safe versioned event serialization.
+- `app/integration_api.py`: optional authenticated loopback-only read API.
+
+Optional Unified AI Lab integration is disabled by default. When enabled with a private local token, ABA exposes only sanitized authoritative status and event updates on loopback. The API reads already-approved state and is never placed between Telegram processing, duplicate reservation, the dashboard, or Khmer TTS. API configuration/bind failure never stops the authoritative payment pipeline.
 
 ## Authorization and security
 
@@ -182,7 +187,7 @@ KHR and USD totals remain separate. No exchange-rate conversion is invented.
 
 ## Testing status
 
-The latest complete suite contains 109 tests and passed after the current dashboard/history changes.
+The latest complete suite contains 122 tests and passed after the single-instance and optional privacy-safe integration API changes.
 
 Coverage includes:
 
@@ -306,6 +311,16 @@ Repository-level instructions in `AGENTS.md` require future Codex sessions to ma
 This mechanism applies when Codex is actively working in this repository. It cannot capture conversations held outside the repository/session, and it must not override an explicit request for discussion only or no file changes.
 
 ## Conversation and Decision Log
+
+### 2026-09-03 — Authoritative Unified AI Lab integration
+
+- Reproduced the previously documented 111-test baseline after replacing the stale development-only `.venv`; no production credentials, session, database, or logs were copied.
+- Preserved and checkpointed the four pre-existing secondary-display changes before integration work.
+- Added a Windows named mutex acquired before any Telegram initialization; a rejected second instance exits safely without starting the listener.
+- Added the optional versioned, read-only, bearer-authenticated loopback API and privacy-safe cursor/event contract. Unknown banks remain valid and export as `OTHER BANK`/`UNMAPPED`; exact USD cents and whole KHR use integer minor units.
+- Added an additive integration-update table and event columns without changing duplicate reservation, parser authority, spoken history, or existing dashboard behavior.
+- Invalid API configuration or bind failure disables only integration and does not stop ABA payment monitoring.
+- Complete suite passed with 122 tests. Live production activation remains pending because the authoritative non-Dropbox runtime was not present on this PC; no Telegram listener or real payment test was started.
 
 ### 2026-08-30 — Cross-PC handoff and GitHub controls
 
