@@ -7,6 +7,7 @@ from app.audio_queue import AudioItem, AudioQueue
 from app.config import load_settings, update_env_file
 from app.dashboard import Dashboard
 from app.database import PaymentStore
+from app.single_instance import SingleInstanceLock
 from app.telegram_listener import TelegramListener
 from app.tts import EdgeKhmerSpeech
 
@@ -41,7 +42,18 @@ def configure_logging(secrets=()) -> None:
     logging.getLogger("telethon").setLevel(logging.WARNING)
 
 
-def main() -> None:
+def main() -> int:
+    instance_lock = SingleInstanceLock()
+    if not instance_lock.acquire():
+        print("ABA Payment Speaker is already running.")
+        return 1
+    try:
+        return _run_application()
+    finally:
+        instance_lock.release()
+
+
+def _run_application() -> int:
     settings = load_settings()
     configure_logging((settings.telegram_api_hash, settings.telegram_phone))
     store = PaymentStore(settings.database_path)
@@ -74,7 +86,8 @@ def main() -> None:
         dashboard.run()
     finally:
         listener.stop(); audio.stop(); store.close()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
