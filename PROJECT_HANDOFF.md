@@ -337,7 +337,8 @@ This mechanism applies when Codex is actively working in this repository. It can
 - Inspection found a separate transfer blocker: this workspace is on `feature/unified-ai-lab-integration` at `175e2f8`, while its local/remote `main` is at `eaa2429`; the Dropbox AI_STUDIO clone is on `main`/`origin/main` at `8807561` and has local edits/untracked files. The sync helper publishes `main` only. Do not push, merge, discard, stash, or pull until the owner chooses how to preserve/integrate the changes.
 - Owner authorized publishing the source branch to `main`, leaving the AI_STUDIO clone's other local edits/untracked files preserved.
 - Full regression suite passed on the feature branch with the pull-helper/docs fix: 151 tests. `git diff --check` passed. The exact AI_STUDIO pull script reports its dirty files and stops safely.
-- Before publication, add and test a commit for the focused pull-helper/documentation fix, then fast-forward local `main` from the feature branch and push `main` only if the remote still permits a fast-forward. Do not change or overwrite the AI_STUDIO clone's local changes.
+- Committed the focused fix as `a6d7600`, fast-forwarded local `main` from the feature branch, and pushed normally. Verified `origin/main` matched local `main` at `a6d760044cf5362878845ae6bbaebc2d2067d02f`; no force push was used.
+- The AI_STUDIO clone remains on its older `main` with its other local modifications and untracked files intact; it was not pulled, stashed, committed, or reset. For PC2 testing, use a fresh normal local clone rather than pulling over that dirty Dropbox worktree. No other-PC runtime, credentials, Telegram session, or database were changed.
 
 ### 2026-11-02 — Speaker operation restored
 
