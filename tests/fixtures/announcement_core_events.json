@@ -1,0 +1,47 @@
+[
+  {
+    "schema_version": 1,
+    "event_id": "synthetic-khr-001",
+    "source_epoch": "synthetic-stage1",
+    "source_sequence": 1,
+    "source_update_at": "2026-10-19T10:00:01+00:00",
+    "occurred_at": "2026-10-19T10:00:00+00:00",
+    "amount_minor": 2500,
+    "currency": "KHR",
+    "sender_display_name": "Synthetic User",
+    "bank_code": "ABA",
+    "bank_display_name": "ABA",
+    "bank_mapping_status": "VERIFIED",
+    "source_announcement_status": "QUEUED"
+  },
+  {
+    "schema_version": 1,
+    "event_id": "synthetic-usd-002",
+    "source_epoch": "synthetic-stage1",
+    "source_sequence": 2,
+    "source_update_at": "2026-10-19T10:00:02Z",
+    "occurred_at": "2026-10-19T10:00:01Z",
+    "amount_minor": 125,
+    "currency": "USD",
+    "sender_display_name": "Synthetic Khmer",
+    "bank_code": "ACLEDA",
+    "bank_display_name": "ACLEDA",
+    "bank_mapping_status": "VERIFIED",
+    "source_announcement_status": "SPOKEN"
+  },
+  {
+    "schema_version": 1,
+    "event_id": "synthetic-unmapped-003",
+    "source_epoch": "synthetic-stage1",
+    "source_sequence": 3,
+    "source_update_at": "2026-10-19T10:00:03Z",
+    "occurred_at": "2026-10-19T10:00:02Z",
+    "amount_minor": 5000,
+    "currency": "KHR",
+    "sender_display_name": "Sample Payer",
+    "bank_code": "UNMAPPED",
+    "bank_display_name": "OTHER BANK",
+    "bank_mapping_status": "UNMAPPED",
+    "source_announcement_status": "FAILED"
+  }
+]
