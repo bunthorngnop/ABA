@@ -19,7 +19,7 @@ if not exist ".git" (
   goto :failed
 )
 
-powershell -NoProfile -Command "$running = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue ^| Where-Object { $_.Name -eq 'pythonw.exe' -and $_.CommandLine -match 'main\.py' }; if ($running) { exit 1 } else { exit 0 }"
+powershell -NoProfile -Command "$processes = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue; foreach ($process in $processes) { if ($process.Name -eq 'pythonw.exe' -and $process.CommandLine -match 'main\.py') { exit 1 } }; exit 0"
 if errorlevel 1 (
   echo ERROR: ABA Payment Speaker appears to be running.
   echo Close its dashboard completely, then run this file again.
@@ -29,7 +29,10 @@ if errorlevel 1 (
 git status --porcelain > "%TEMP%\aba-payment-speaker-status.txt"
 for %%A in ("%TEMP%\aba-payment-speaker-status.txt") do if not %%~zA==0 (
   echo ERROR: This project has local source changes or untracked files.
-  echo Push, commit, or review them before pulling. Nothing was overwritten.
+  echo Review the files listed below. Nothing was overwritten.
+  git status --short
+  echo.
+  echo Preserve the changes before pulling: commit and push them, or use a clean clone.
   del /q "%TEMP%\aba-payment-speaker-status.txt" >nul 2>nul
   goto :failed
 )

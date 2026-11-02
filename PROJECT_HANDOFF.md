@@ -229,7 +229,7 @@ One-click files:
 - `SET UP ON THIS PC.bat`: validates local non-Dropbox location, Python 3.12, `.venv`, dependencies, `.env`, and tests. It never starts production automatically.
 - `Start ABA Payment Speaker.bat`: starts the application from the local `.venv`.
 - `PUSH TO GITHUB.bat`: tests and invokes the secret-safe commit/push workflow.
-- `PULL FROM GITHUB.bat`: refuses a running app or dirty worktree, pulls with `--ff-only`, refreshes dependencies, and tests.
+- `PULL FROM GITHUB.bat`: checks that no app is running, displays and refuses a dirty worktree without overwriting local changes, pulls with `--ff-only`, refreshes dependencies, and tests. If the pull is blocked by local changes, preserve and review them or use a clean clone; do not force/reset.
 
 PC3 Windows startup configuration (local operating-system state, not synchronized by GitHub):
 
@@ -262,8 +262,8 @@ Do not copy that identity globally unless the user explicitly requests it.
 
 On the PC where source changed:
 
-1. Run the complete tests.
-2. Double-click `PUSH TO GITHUB.bat`.
+1. Confirm the intended source changes are on the local `main` branch. The current sync script pushes `main` only.
+2. Double-click `PUSH TO GITHUB.bat`; it runs the complete tests before syncing.
 3. Wait for `SUCCESS`.
 
 On the other PC:
@@ -327,6 +327,17 @@ This mechanism applies when Codex is actively working in this repository. It can
 - Inspected `C:\Users\Wing\Dropbox\AI_STUDIO\ABA Payment Speaker`: it is a Git clone with the existing test-before-push, safe-sync, pull-and-test, first-time-setup, and local launch scripts.
 - Recommended source-only transfer using `PUSH TO GITHUB.bat` on the source PC and `PULL FROM GITHUB.bat` in the other PC's normal local clone, followed by that PC's `Start ABA Payment Speaker.bat`. Dropbox remains a source/editing location, not a production runtime.
 - Do not copy `.env`, `.venv`, Telegram session files, SQLite databases, or logs; set up per-PC credentials and Telegram login locally. No files were transferred, no scripts were run, and no code/configuration changed.
+
+### 2026-11-02 — Safe pull script PowerShell check
+
+- Owner reported the other-PC `PULL FROM GITHUB.bat` passed a literal `^|` to PowerShell, then correctly refused to overwrite local source changes/untracked files.
+- Replaced the escaped pipeline with a `foreach` check that avoids shell pipe escaping; dirty-worktree failure now displays `git status --short` and tells the operator to preserve changes or use a clean clone.
+- Applied the corrected pull helper both in this repository and in the Dropbox AI_STUDIO clone where the owner ran it. Updated `OTHER_PC_SETUP.md` and the pull-script handoff instructions. The dirty worktree remains protected; no changes were stashed, discarded, committed, or pulled.
+- Verified the exact `cmd.exe` → PowerShell process check exits successfully; exercised matching and nonmatching process cases; ran the helper from the exact Dropbox clone and confirmed it prints the modified/untracked paths and exits without pulling.
+- Inspection found a separate transfer blocker: this workspace is on `feature/unified-ai-lab-integration` at `175e2f8`, while its local/remote `main` is at `eaa2429`; the Dropbox AI_STUDIO clone is on `main`/`origin/main` at `8807561` and has local edits/untracked files. The sync helper publishes `main` only. Do not push, merge, discard, stash, or pull until the owner chooses how to preserve/integrate the changes.
+- Owner authorized publishing the source branch to `main`, leaving the AI_STUDIO clone's other local edits/untracked files preserved.
+- Full regression suite passed on the feature branch with the pull-helper/docs fix: 151 tests. `git diff --check` passed. The exact AI_STUDIO pull script reports its dirty files and stops safely.
+- Before publication, add and test a commit for the focused pull-helper/documentation fix, then fast-forward local `main` from the feature branch and push `main` only if the remote still permits a fast-forward. Do not change or overwrite the AI_STUDIO clone's local changes.
 
 ### 2026-11-02 — Speaker operation restored
 

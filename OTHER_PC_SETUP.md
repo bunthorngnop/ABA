@@ -37,15 +37,13 @@ Run the speaker application on only one PC at a time. Close it completely on PC1
 
 ## Normal transfer between PCs
 
-On the PC where work was changed, close the application and double-click `Sync ABA Payment Speaker to GitHub.bat`. Wait for `SUCCESS`.
+On the PC where work was changed, close the application and double-click `PUSH TO GITHUB.bat`. It runs the regression suite and then starts the safe GitHub sync. The sync script publishes the local `main` branch only; confirm the intended changes are on `main` first. Do not expect changes on another branch to be published by this script.
 
-On the other PC, ensure the application is closed, then run in its project folder:
+On the other PC, ensure the application is closed, then double-click `PULL FROM GITHUB.bat` in its normal local clone. It checks that ABA is not running, refuses to overwrite a dirty worktree, pulls with fast-forward-only protection, refreshes dependencies, and runs the complete test suite.
 
-```powershell
-git pull --ff-only
-```
+If the pull script reports local source changes or untracked files, do not delete them or force the pull. Review `git status --short`; preserve and push/commit the work from its source PC, or create a fresh clone for testing.
 
-Restart the application. Do not copy `.env`, `.venv`, the Telegram `.session`, or the SQLite database between PCs.
+After a successful pull, confirm every other speaker PC is closed, then start with `Start ABA Payment Speaker.bat`. Do not copy `.env`, `.venv`, the Telegram `.session`, the SQLite database, or logs between PCs.
 
 ## Prompt for Codex on PC2
 
