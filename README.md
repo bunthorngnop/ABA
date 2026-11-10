@@ -6,25 +6,34 @@ This Windows application monitors configured Telegram groups through your own au
 
 The primary screen is a dark, shop-counter dashboard built around the latest validated payment:
 
-- the received KHR or USD amount is the largest element;
-- the large local clock stays centered above the payment card, with a readable date beneath it;
-- the shop header uses the two-line Khmer title `វីង វណ្ណា-ស្រីមុិច` / `ប្រព័ន្ធទទួលប្រាក់` in Khmer OS Muol Light when installed, with safe Khmer-capable fallbacks;
+- the received KHR or USD amount is the largest element; instead of `៛`/`$` it is preceded by a currency coin icon (green with a white `៛` for KHR, gold with a white `$` for USD) about 1.1× the digit height, centred vertically on the digits, and the amount font shrinks if needed so note and amount always stay on one line;
+- the compact header is a single row with the shop's two-line Khmer title at left, time/date/LIVE centered across the full window, and a modern "glass ticker" NBC card at right: a rounded dark card with a cyan-to-violet gradient border, a live dot, the Khmer title `អត្រាប្តូរប្រាក់ធនាគារជាតិ` (Siemreap) and the date in Orbitron, the owner-supplied NBC logo (`assets/nbc_logo.png`, scaled to the digit height with its white background made transparent; the card works without it) followed by the official rate in large Bahnschrift digits and a matching `៛`, centred horizontally and vertically together with a pill — green `▲ +2` / gold `▼ −2` against NBC's previous value (the rate itself also turns green or gold), or a neutral grey `▲▼ 0` while unchanged; the Khmer title uses the same grey as the date — `KHR / USD` in Montserrat, and a 7-day sparkline built from one stored public NBC value per day; the header stays 170 px high at 1080 px and wider;
+- the Dashboard is split 50% / 25% / 25% at every window size: `LAST PAYMENT RECEIVED` with RECENT ANNOUNCED PAYMENTS — TODAY below it in the left half, and the rates & gold card and private-rates card each spanning the full height of both, so their bottom edges line up with the payment history;
+- the payment card ends with a slim today line, e.g. `Today 23 payments · KHR 1,250,000 · USD 340.00`, counting successfully announced payments only;
+- the rates & gold card (`អត្រាប្តូរប្រាក់ និង មាស`) is a `BANK | ទិញ $ | លក់ $` table (header row highlighted in slate blue) for ACLEDA Notes and Wing Telegraphic Transfer Outbound (KHR per USD) plus a full-width international GOLD row: a small `GOLD · XAU/USD · oz · <time>` line, then the price per troy ounce, `≈ $… / ដំឡឹង` and `≈ $… / ជី` (exact conversions from 37.5 g and 3.75 g), all three at the same Bahnschrift size, each local unit followed by a small Cambodian flag drawn at the figure height (Tk cannot show the flag emoji); NBC is shown only in the header card; ABA is not shown because ABA's website does not permit automated access. Figures use Bahnschrift (18 pt, 12 pt below 1080 px): ទិញ red, លក់ light blue, gold warm gold, with the existing gentle pulse; rows keep dark tints (ACLEDA teal-slate, WING violet-slate, GOLD dark gold);
+- every rate box shows one trend arrow right after its figure, in the private card's style: `▲` green or `▼` gold for the direction of its last change (no arrow before the first change, or when the value is missing or outdated); the gold ដំឡឹង and ជី lines repeat the gold arrow after their flags; no cell is outlined; bank figures shrink, never their cells, so figure and arrow stay on one line; ACLEDA and WING show their names centred above their logos (60 px, 44 px below 1080 px), and the compact gold row leaves spare height to the bank rows; the best fresh ACLEDA/WING quotes (highest ទិញ, lowest លក់) get a thin gold outline; an outdated row dims and loses its arrows/outline; the footer shows when bank rates were last checked;
+- bank rates load from the local SQLite cache at startup and are fetched in the background approximately every 15 minutes; on weekends and holidays NBC publishes no new rate, so the last published NBC rate (with its date) stays current for up to 4 days instead of being marked stale; gold is fetched at most every 12 hours (see **Gold price** below); the cache keeps each figure's previous different value so arrows survive restarts; displayed age/status refreshes locally once per second without network requests;
+- the private-rates card is dark with a yellow title bar (`អត្រាប្តូរប្រាក់ឯកជន - Private rates`); when the card is at least 300 px wide a status dot and a short CONNECT/DISCONNECT button share the title bar, otherwise the status chip and button sit in a yellow footer;
+- private-group posts remain unverified and are only reformatted for display; they are never treated as bank quotes, stored, or spoken; the visible UNVERIFIED label has been removed; the group reader connects automatically when ABA starts, using a separate Telegram session from the payment listener;
+- Khmer text in the private card uses Siemreap when installed and the application's Khmer-capable font fallback otherwise; number-only and Latin segments use the UI font;
+- SYSTEM STATUS, TODAY totals, and CONTROLS are available together in the scrollable Operations subtab under Settings & Diagnostics; CONTROLS is no longer on the Dashboard;
+- the shop header uses the two-line Khmer title `វីង វណ្ណា-ស្រីម៉ិច` / `ប្រព័ន្ធទទួលប្រាក់` in Khmer OS Muol Light when installed, with safe Khmer-capable fallbacks;
 - KHR amounts use success green while USD amounts use a distinct warm gold;
 - the validated payer name appears in blue;
 - the normalized originating bank appears in violet;
 - `ANNOUNCED` appears only after the audio queue reports successful speech;
-- system readiness, spoken-only daily totals, and a three-row recent-payment viewport are shown using privacy-safe fields;
-- when today has more than three successfully announced payments, the larger-text recent-payment area scrolls through up to 1,000 current-day records, newest first; complete KHR rows are green, complete USD rows are gold, and sender names are bold;
-- the dashboard adapts to shorter displays by tightening sender/bank cards and, only on very short screens, collapsing the secondary status column so the received amount remains visible.
+- RECENT ANNOUNCED PAYMENTS — TODAY sits under the payment card at the same 50% width; its list grows or shrinks (minimum two rows) to fill the space left in the window, so the Dashboard avoids scrolling at the shop screen size; below 1080 px the BANK and TIME columns use a smaller condensed font (Bahnschrift SemiCondensed);
+- when today has more announced payments than fit, the recent-payment list scrolls through up to 1,000 current-day records, newest first; complete KHR rows are green, complete USD rows are gold, and sender names are bold;
+- the Dashboard adapts to shorter displays by tightening sender/bank cards and the amount typography; a vertical scrollbar keeps the payment, rates, and history accessible when they cannot fit in the available height.
 - at application startup, the dashboard waits briefly for an active secondary monitor and maximizes there; if no secondary display becomes available, it opens at normal size on the primary monitor.
 
 Telegram commissioning IDs and the safe parser test remain available under **Settings & Diagnostics**, away from the operational display. No raw Telegram payload, account fragment, transaction ID, APV, merchant, operator, credential, or session data is shown in payment history.
 
 ## What changed
 
-Telegram did not expose Bot-to-Bot Communication Mode for the original receiving bot, so the Bot API listener was replaced with a read-only Telethon user-session listener. The parser, Khmer number conversion, bank normalization, SQLite duplicate protection, audio queue, TTS, dashboard, and safety rules remain unchanged.
+Telegram did not expose Bot-to-Bot Communication Mode for the original receiving bot, so the Bot API listener was replaced with a read-only Telethon user-session listener. Payment parsing, Khmer amount conversion, bank normalization, SQLite duplicate protection, payment wording, and the configured payment voice remain unchanged. The dashboard also supports a separate read-only viewer for posts from one fixed private exchange group, first-party public bank-rate refresh from NBC/ACLEDA/Wing, and scheduled time announcements through the existing audio queue.
 
-The listener does not send messages, join groups, modify chats, mark setup IDs as trusted automatically, or expose raw payment messages in the dashboard.
+The payment listener and private-group reader use different session files. The private-group reader does not send messages, join groups, modify chats, parse messages as payments, or queue speech. It does not expose raw payment messages in the dashboard. Exchange-rate fetch/parse/cache failures are isolated from payment monitoring, the private reader, scheduled announcements, and speech.
 
 ## Requirements
 
@@ -158,7 +167,60 @@ Press **Test Speaker** to hear:
 ប្រព័ន្ធប្រកាសការទូទាត់កំពុងដំណើរការ។
 ```
 
-Microsoft voice `km-KH-SreymomNeural` is used through `edge-tts`, so speech requires internet. Announcements are queued and never overlap.
+Microsoft voice `km-KH-SreymomNeural` is used through `edge-tts` for payment announcements, so speech requires internet. Announcements are queued and never overlap.
+
+### Daily time announcements
+
+The application queues Khmer time announcements using Cambodia local time:
+
+- Sunday–Wednesday and Friday–Saturday: 16:10 and 18:10;
+- Thursday: 16:05 and 18:05, prefaced with a Khmer equivalent of “Today is Thursday.”
+
+Scheduled announcements use the male Khmer voice `km-KH-PisethNeural`; payment announcements continue using the configured voice. Each date/time slot is claimed once in the local SQLite database. Missed slots are skipped rather than announced late, and the existing speaker mute setting is respected. The application must be running, awake, online for TTS, and unmuted at the scheduled time. It does not change Windows system volume.
+
+### Hourly time announcements
+
+Every day, exactly on the hour from 08:00 to 22:00, the male voice says `នៅពេលនេះម៉ោង {hour} {period}` (no final `។`): ព្រឹក for 08:00–11:00, `១២ ថ្ងៃត្រង់` at 12:00, រសៀល for 13:00–17:00 (spoken as ១–៥), ល្ងាច at 18:00 (៦), and យប់ for 19:00–22:00 (៧–១០). These are in addition to the 16:10/18:10 (Thursday 16:05/18:05) announcements. If a payment announcement is speaking, the hourly announcement follows it; if it cannot start within 60 seconds of the hour it is skipped, never played late. Each hour is claimed once per day in SQLite, and mute is respected.
+
+### Payment-monitoring alert
+
+The payment listener pings Telegram every 30 seconds. If payment monitoring stays down for 2 minutes (including no connection at startup), the male voice says `សូមជូនដំណឹង ប្រព័ន្ធទទួលប្រាក់ត្រូវបានផ្តាច់ សូមពិនិត្យអ៊ីនធឺណិត`, or `សូមចូល Telegram ឡើងវិញ` when Telegram has revoked or expired the login, and repeats every 10 minutes until it recovers, when `ប្រព័ន្ធទទួលប្រាក់បានភ្ជាប់ឡើងវិញ` is said once. Alerts play from pre-recorded files in `assets/` (no internet needed), are heard even when the speaker is muted, run at any time of day, and are active only in production mode.
+
+### Gold price
+
+The GOLD row uses GoldAPI.io's free plan (150 requests per month), which permits displaying the data to the app's users. To enable it:
+
+1. Create a free account at goldapi.io and copy your API key.
+2. Add one line to this PC's private `.env`: `GOLD_API_KEY=your-key-here`. Never commit, paste, or share the key.
+3. Restart ABA.
+
+The app sends the key only as a request header, redacts it from logs, and fetches gold at most every 12 hours (about 60 requests per month), including across restarts because the last price is cached. After a failed request it waits at least one hour before retrying. Without a key the gold row shows `—` and everything else works normally. The `≈ / ដំឡឹង` and `≈ / ជី` lines are exact conversions of the world price (37.5 g and 3.75 g per troy ounce of 31.1034768 g) and do not include local shop premiums.
+
+### Private exchange-group posts
+
+The private-rates card (third Dashboard column) connects automatically when ABA starts and shows posts from the private exchange group already accessible to the group member's account. Each sender appears once with their latest post (reposts replace the earlier entry), newest sender first, under a `HH:MM  short name` header. Short names drop emoji, anything after `(` or `👉`, and 3+ digit groups, and are cut at about 18 characters.
+
+Posts are converted, for display only, into two-line offers:
+
+```text
+USD→KHR   4090.5 KHR ▼  +5.5      ← tag, rate (14 pt bold), trend arrow, gap from NBC
+          30,000 USD  ABA·AC      ← amount (12 pt bold), banks
+```
+
+- **Tag**: `KHR→USD` (light blue) when the poster offers riel for dollars, `USD→KHR` (light red) when the poster offers dollars for riel, and `·` when the direction is unclear (for example `អោយ ABA 4091`, or both currencies offered on one line). The tag comes only from the words around `ដូរ`/`ដូ`/`យក`/`ទិញ`/`មាន` and the leading currency; nothing is guessed.
+- **Rate**: a four-digit figure between 3,800 and 4,400 with optional 1–2 cent digits after `.` or `,` (thousands separators allowed, e.g. `4,089,5`), always shown with a dot and `KHR`, e.g. `4089.5 KHR`. Sizes and phone fragments are never treated as rates. Below 1080 px the rate and amount use 12 / 10 pt.
+- **Trend arrow**: `▲` green / `▼` orange against that sender's previous different rate in the same direction (memory only, so it restarts with the app). **Gap**: the small `+5` / `−2` is the difference from the current NBC official rate.
+- **Amount**: thousands separators added; `USD`/`KHR` only when the post marked a currency, `M KHR` for `លាន`, and no currency when the post gave none.
+- **Banks**: display-only short names (`ABA`, `AC`, `Wing`, `Amret`, `ស្ថាបនា`, `KB`, `Cana`) plus `គ្រប់កុង`/`អីក៏បាន`; this list is separate from the payment bank registry.
+- `$`/`៛` and riel/dollar words become `USD`/`KHR`, glued words are spaced, and `*`, `**`, `x`, `=` become `×` in cleaned text. A line without a rate that sits directly above a rate line in the same group is joined to it; two rate lines are never merged.
+- Offers without a rate are shown as muted cleaned text; notes such as `No ABA` and `min 5,000 USD` appear in small muted text. Phone numbers, contact/"Acc" lines, "receive into" bank lists (`យក…` with no number), and blank lines are hidden.
+- The summary strip shows, one line per direction, the low–high tagged rate from each sender's latest post in the last 15 minutes (e.g. `KHR→USD  4089 – 4090 KHR ▲`), marked `posts · 15 min`, with an arrow against the previous different range. It does not pick a best rate or a bank.
+- A sender's block glows for about 10 seconds when a live post brings new or changed offers (posts loaded at connect do not glow); posts older than 15 minutes turn grey and posts older than one hour move to the bottom.
+- Edited posts update in place with `✎`; deleted posts are removed; a photo's caption is formatted like text, and a photo without a caption shows `[photo — see Telegram]`. Text inside images is not read.
+
+The app does not validate or label posts as official bank rates. They remain unverified, but no visible UNVERIFIED label is shown. The title stays on one line as `អត្រាប្តូរប្រាក់ឯកជន - Private rates`. Khmer text uses Siemreap when installed, otherwise the application's Khmer-capable fallback font.
+
+The reader fetches the 50 most recent posts from the fixed target group and keeps up to 200 posts only in memory; the panel does not display or process other dialogs, and nothing from the group is saved or logged. On first connection, the phone number, one-time code, and any two-step-verification password are entered in the application dialog and are not saved. The separate session is stored under `%LOCALAPPDATA%\ABA Payment Speaker\rate_group_user.session`; it is not the payment listener's session. **DISCONNECT** stops reading but leaves that local Telegram session signed in. To resolve access to a private Telegram group, Telegram may return dialog metadata while the app locates that group. A Telegram user session itself can access other chats available to that account, so the account holder should use the dedicated session only on a trusted PC and may revoke it through Telegram at any time. The reader remains independent; payment monitoring and announcements continue if it is unavailable.
 
 ## Security and duplicate behavior
 
