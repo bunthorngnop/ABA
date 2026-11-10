@@ -1,13 +1,23 @@
 import asyncio
 import logging
 import queue
+import random
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
 from telethon import TelegramClient, events
-from telethon.errors import SessionPasswordNeededError
+from telethon.errors import (
+    AuthKeyDuplicatedError,
+    AuthKeyUnregisteredError,
+    SessionExpiredError,
+    SessionPasswordNeededError,
+    SessionRevokedError,
+    UserDeactivatedBanError,
+    UserDeactivatedError,
+)
+from telethon.tl.functions import PingRequest
 
 from .config import Settings, user_session_configuration_errors
 from .database import PaymentStore
@@ -15,6 +25,17 @@ from .models import ParserStatus
 from .payment_parser import build_announcement, parse_payment
 
 logger = logging.getLogger(__name__)
+
+HEALTH_CHECK_SECONDS = 30
+HEALTH_TIMEOUT_SECONDS = 20
+LOGIN_ERRORS = (
+    AuthKeyDuplicatedError,
+    AuthKeyUnregisteredError,
+    SessionExpiredError,
+    SessionRevokedError,
+    UserDeactivatedBanError,
+    UserDeactivatedError,
+)
 
 
 def authorize_message(settings: Settings, chat_id: int, sender_id: Optional[int], username: Optional[str]) -> tuple[bool, str]:
@@ -43,11 +64,14 @@ class TelegramListener:
     """Read-only Telegram user-session monitor using Telethon."""
 
     def __init__(self, settings: Settings, store: PaymentStore, announce: Callable[[str, str], None],
-                 state_callback: Callable[[str, object], None]):
+                 state_callback: Callable[[str, object], None],
+                 health_callback: Optional[Callable[[bool, str], None]] = None):
         self.settings = settings
         self.store = store
         self.announce = announce
         self.state_callback = state_callback
+        self.health_callback = health_callback
+        self._stopping = False
         self._client: Optional[TelegramClient] = None
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -75,6 +99,7 @@ class TelegramListener:
         self._client.session.save_entities = False
         await self._client.connect()
         if not await self._client.is_user_authorized():
+            self._report_health(False, "login")
             self.state_callback("setup", "Login required")
             sent_code = await self._client.send_code_request(self.settings.telegram_phone)
             self.state_callback("setup", "Verification code required")
@@ -144,19 +169,55 @@ class TelegramListener:
         })
         self.announce(announcement, key)
 
+    def _report_health(self, healthy: bool, reason: str = "network") -> None:
+        if self.health_callback:
+            try:
+                self.health_callback(healthy, reason)
+            except Exception:
+                logger.exception("Could not report payment-monitoring health")
+
+    async def _health_loop(self) -> None:
+        """Ping Telegram regularly so a silent disconnection is noticed and announced."""
+        while True:
+            try:
+                await asyncio.wait_for(
+                    self._client(PingRequest(ping_id=random.getrandbits(63))),
+                    timeout=HEALTH_TIMEOUT_SECONDS,
+                )
+                self._report_health(True, "ok")
+            except asyncio.CancelledError:
+                raise
+            except LOGIN_ERRORS:
+                self._report_health(False, "login")
+            except Exception:
+                self._report_health(False, "network")
+            await asyncio.sleep(HEALTH_CHECK_SECONDS)
+
     async def _run_async(self) -> None:
+        health_task = None
         try:
             if not await self._authenticate():
                 return
             self._client.add_event_handler(self._handle, events.NewMessage(incoming=True))
             if self.settings.production_ready:
                 self.state_callback("setup", "Production ready")
+            health_task = asyncio.get_running_loop().create_task(self._health_loop())
             await self._client.run_until_disconnected()
+        except LOGIN_ERRORS as exc:
+            logger.error("Telegram session needs signing in again: %s", type(exc).__name__)
+            self._report_health(False, "login")
+            self.state_callback("telegram", "Error")
+            self.state_callback("setup", f"Setup error: {type(exc).__name__}")
         except Exception as exc:
             logger.exception("Telegram user-session listener stopped: %s", type(exc).__name__)
+            self._report_health(False, "network")
             self.state_callback("telegram", "Error")
             self.state_callback("setup", f"Setup error: {type(exc).__name__}")
         finally:
+            if health_task is not None:
+                health_task.cancel()
+                if not self._stopping:
+                    self._report_health(False, "network")
             if self._client and self._client.is_connected():
                 await self._client.disconnect()
             self.state_callback("telegram", "Disconnected")
@@ -172,6 +233,7 @@ class TelegramListener:
         self._thread.start()
 
     def stop(self) -> None:
+        self._stopping = True
         if self._client and self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(self._client.disconnect(), self._loop)
         if self._thread:
