@@ -1,13 +1,18 @@
 import hashlib
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from .models import PaymentResult
 from .integration_contract import payment_event
+
+if TYPE_CHECKING:
+    from .exchange_rates import ExchangeRate
+
+_CAMBODIA = timezone(timedelta(hours=7), "ICT")
 
 
 class PaymentStore:
@@ -39,13 +44,140 @@ class PaymentStore:
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(event_key) REFERENCES events(event_key)
             );
+            CREATE TABLE IF NOT EXISTS exchange_rate_cache (
+                source TEXT PRIMARY KEY,
+                category TEXT NOT NULL,
+                official_rate TEXT,
+                buy_rate TEXT,
+                sell_rate TEXT,
+                effective_at TEXT NOT NULL,
+                fetched_at TEXT,
+                last_error TEXT
+            );
+            CREATE TABLE IF NOT EXISTS nbc_rate_history (
+                rate_date TEXT PRIMARY KEY,
+                official_rate TEXT NOT NULL,
+                recorded_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS scheduled_announcements (
+                schedule_date TEXT NOT NULL,
+                slot TEXT NOT NULL,
+                claimed_at TEXT NOT NULL,
+                PRIMARY KEY(schedule_date, slot)
+            );
         """)
         columns = {row[1] for row in self._connection.execute("PRAGMA table_info(events)")}
         if "bank_mapping_status" not in columns:
             self._connection.execute("ALTER TABLE events ADD COLUMN bank_mapping_status TEXT NOT NULL DEFAULT 'UNMAPPED'")
         if "announced_at" not in columns:
             self._connection.execute("ALTER TABLE events ADD COLUMN announced_at TEXT")
+        rate_columns = {row[1] for row in self._connection.execute("PRAGMA table_info(exchange_rate_cache)")}
+        for column in ("previous_official_rate", "previous_buy_rate", "previous_sell_rate"):
+            if column not in rate_columns:
+                self._connection.execute(f"ALTER TABLE exchange_rate_cache ADD COLUMN {column} TEXT")
         self._connection.commit()
+
+    def save_exchange_rate(self, rate: "ExchangeRate") -> None:
+        with self._lock:
+            self._connection.execute(
+                """INSERT INTO exchange_rate_cache
+                   (source, category, official_rate, buy_rate, sell_rate, effective_at, fetched_at, last_error)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+                   ON CONFLICT(source) DO UPDATE SET
+                       category=excluded.category,
+                       previous_official_rate=CASE
+                           WHEN exchange_rate_cache.official_rate IS NOT NULL
+                                AND excluded.official_rate IS NOT NULL
+                                AND CAST(exchange_rate_cache.official_rate AS REAL) != CAST(excluded.official_rate AS REAL)
+                           THEN exchange_rate_cache.official_rate
+                           ELSE exchange_rate_cache.previous_official_rate END,
+                       previous_buy_rate=CASE
+                           WHEN exchange_rate_cache.buy_rate IS NOT NULL
+                                AND excluded.buy_rate IS NOT NULL
+                                AND CAST(exchange_rate_cache.buy_rate AS REAL) != CAST(excluded.buy_rate AS REAL)
+                           THEN exchange_rate_cache.buy_rate
+                           ELSE exchange_rate_cache.previous_buy_rate END,
+                       previous_sell_rate=CASE
+                           WHEN exchange_rate_cache.sell_rate IS NOT NULL
+                                AND excluded.sell_rate IS NOT NULL
+                                AND CAST(exchange_rate_cache.sell_rate AS REAL) != CAST(excluded.sell_rate AS REAL)
+                           THEN exchange_rate_cache.sell_rate
+                           ELSE exchange_rate_cache.previous_sell_rate END,
+                       official_rate=excluded.official_rate,
+                       buy_rate=excluded.buy_rate,
+                       sell_rate=excluded.sell_rate,
+                       effective_at=excluded.effective_at,
+                       fetched_at=excluded.fetched_at,
+                       last_error=NULL""",
+                (
+                    rate.source,
+                    rate.category,
+                    str(rate.official_rate) if rate.official_rate is not None else None,
+                    str(rate.buy_rate) if rate.buy_rate is not None else None,
+                    str(rate.sell_rate) if rate.sell_rate is not None else None,
+                    rate.effective_at,
+                    rate.fetched_at.isoformat() if rate.fetched_at is not None else None,
+                ),
+            )
+            if rate.source == "NBC" and rate.official_rate is not None and rate.fetched_at is not None:
+                local_date = rate.fetched_at.astimezone(_CAMBODIA).date().isoformat() if rate.fetched_at.tzinfo else rate.fetched_at.date().isoformat()
+                self._connection.execute(
+                    """INSERT INTO nbc_rate_history(rate_date, official_rate, recorded_at) VALUES (?, ?, ?)
+                       ON CONFLICT(rate_date) DO UPDATE SET
+                           official_rate=excluded.official_rate, recorded_at=excluded.recorded_at""",
+                    (local_date, str(rate.official_rate), datetime.now(timezone.utc).isoformat()),
+                )
+            self._connection.commit()
+
+    def load_nbc_history(self, days: int = 7) -> list[Decimal]:
+        """Return up to the last `days` daily NBC official rates, oldest first (public data only)."""
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT official_rate FROM nbc_rate_history ORDER BY rate_date DESC LIMIT ?",
+                (max(1, int(days)),),
+            ).fetchall()
+        return [Decimal(str(row["official_rate"])) for row in reversed(rows)]
+
+    def clear_exchange_rate_error(self, source: str) -> None:
+        with self._lock:
+            self._connection.execute(
+                "UPDATE exchange_rate_cache SET last_error=NULL WHERE source=?",
+                (source,),
+            )
+            self._connection.commit()
+
+    def mark_exchange_rate_error(self, source: str, category: str, error: str) -> None:
+        with self._lock:
+            self._connection.execute(
+                """INSERT INTO exchange_rate_cache
+                   (source, category, effective_at, last_error)
+                   VALUES (?, ?, '', ?)
+                   ON CONFLICT(source) DO UPDATE SET
+                       category=excluded.category,
+                       last_error=excluded.last_error""",
+                (source, category, error),
+            )
+            self._connection.commit()
+
+    def load_exchange_rates(self) -> list[dict[str, object]]:
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT source, category, official_rate, buy_rate, sell_rate,
+                          effective_at, fetched_at, last_error,
+                          previous_official_rate, previous_buy_rate, previous_sell_rate
+                   FROM exchange_rate_cache ORDER BY source"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def claim_scheduled_announcement(self, schedule_date: str, slot: str) -> bool:
+        with self._lock:
+            cursor = self._connection.execute(
+                """INSERT OR IGNORE INTO scheduled_announcements(schedule_date, slot, claimed_at)
+                   VALUES (?, ?, ?)""",
+                (schedule_date, slot, datetime.now(timezone.utc).isoformat()),
+            )
+            self._connection.commit()
+            return cursor.rowcount == 1
 
     @staticmethod
     def event_key(chat_id: int, message_id: int) -> str:

@@ -55,6 +55,8 @@ class Settings:
     integration_host: str = "127.0.0.1"
     integration_port: int = 8766
     integration_token: str = ""
+    rate_group_session_path: Optional[Path] = None
+    gold_api_key: str = ""
 
     @property
     def production_ready(self) -> bool:
@@ -113,6 +115,7 @@ def update_env_file(env_file: str, updates: dict[str, str]) -> None:
 def load_settings(env_file: str = ".env") -> Settings:
     load_dotenv(env_file, override=True)
     default_session = Path(os.getenv("LOCALAPPDATA", "data")) / "ABA Payment Speaker" / "telegram_user.session"
+    rate_group_session = Path(os.getenv("LOCALAPPDATA", "data")) / "ABA Payment Speaker" / "rate_group_user.session"
     session_value = os.path.expandvars(os.getenv("TELEGRAM_SESSION_PATH", "").strip())
     default_database = Path(os.getenv("LOCALAPPDATA", "data")) / "ABA Payment Speaker" / "aba_payment_speaker.sqlite3"
     database_value = os.path.expandvars(os.getenv("DATABASE_PATH", "").strip())
@@ -139,4 +142,6 @@ def load_settings(env_file: str = ".env") -> Settings:
         integration_host=integration_host,
         integration_port=integration_port,
         integration_token=integration_token,
+        rate_group_session_path=rate_group_session,
+        gold_api_key=os.getenv("GOLD_API_KEY", "").strip(),
     )
