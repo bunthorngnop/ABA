@@ -187,22 +187,34 @@ def _run_application() -> int:
         listener_started = True
         payment_alerts.start()
         dashboard.run()
+        logging.getLogger(__name__).info("Dashboard window closed; shutting down")
+    except BaseException:
+        # Recorded before cleanup starts, so the reason survives even if cleanup crashes.
+        logging.getLogger(__name__).exception("Application stopped by an unexpected error; shutting down")
+        raise
     finally:
-        payment_alerts.stop()
-        rate_group_reader.stop()
-        if rate_monitor_started:
-            try:
-                rate_monitor.stop()
-            except Exception:
-                logging.getLogger(__name__).exception("Could not stop exchange-rate refresh")
-        scheduled_announcements.stop()
-        if listener_started:
-            listener.stop()
-        audio.stop()
-        if integration_server:
-            integration_server.stop()
-        store.close()
+        run_cleanup_steps([
+            ("payment alerts", payment_alerts.stop),
+            ("rate-group reader", rate_group_reader.stop),
+            ("exchange-rate refresh", rate_monitor.stop if rate_monitor_started else None),
+            ("scheduled announcements", scheduled_announcements.stop),
+            ("payment listener", listener.stop if listener_started else None),
+            ("audio queue", audio.stop),
+            ("integration API", integration_server.stop if integration_server else None),
+            ("database", store.close),
+        ])
     return 0
+
+
+def run_cleanup_steps(steps) -> None:
+    """Run every shutdown step even when an earlier one fails."""
+    for name, step in steps:
+        if step is None:
+            continue
+        try:
+            step()
+        except Exception:
+            logging.getLogger(__name__).exception("Shutdown step failed: %s", name)
 
 
 def build_integration_server(settings, store, status):

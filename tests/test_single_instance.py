@@ -1,3 +1,5 @@
+import faulthandler
+
 import main
 
 from app.single_instance import ERROR_ALREADY_EXISTS, SingleInstanceLock
@@ -37,14 +39,30 @@ def test_rejected_second_instance_never_initializes_application(monkeypatch, cap
     assert "already running" in capsys.readouterr().out
 
 
-def test_normal_shutdown_releases_lock(monkeypatch):
+def test_normal_shutdown_releases_lock(monkeypatch, tmp_path):
     calls = []
+    crash_logs = []
 
     class AcceptedLock:
         def acquire(self): calls.append("acquire"); return True
         def release(self): calls.append("release")
 
+    real_enable_crash_log = main.enable_crash_log
+
+    def crash_log_in_temp_folder(directory="logs"):
+        # Never write to the real logs/faulthandler.log of the folder the tests run from.
+        handle = real_enable_crash_log(str(tmp_path / "logs"))
+        crash_logs.append(handle)
+        return handle
+
     monkeypatch.setattr(main, "SingleInstanceLock", AcceptedLock)
+    monkeypatch.setattr(main, "enable_crash_log", crash_log_in_temp_folder)
     monkeypatch.setattr(main, "_run_application", lambda: calls.append("run") or 0)
-    assert main.main() == 0
+    try:
+        assert main.main() == 0
+    finally:
+        faulthandler.disable()
+        for handle in crash_logs:
+            handle.close()
     assert calls == ["acquire", "run", "release"]
+    assert (tmp_path / "logs" / "faulthandler.log").is_file()

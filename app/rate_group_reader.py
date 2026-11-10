@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 TARGET_RATE_GROUP_ID = -1001563868468
 MAX_HISTORY_MESSAGES = 50
 MAX_DEDUPLICATED_MESSAGE_IDS = 200
+STOP_JOIN_TIMEOUT_SECONDS = 15
 _PHONE_NUMBER = re.compile(r"^\+[1-9][0-9]{6,14}$")
 _API_HASH = re.compile(r"^[0-9a-fA-F]{32}$")
 
@@ -50,6 +51,8 @@ class RateGroupReader:
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._stop_requested = threading.Event()
+        self._task: Optional[asyncio.Task] = None
+        self._task_lock = threading.Lock()
         self._shown_ids: set[int] = set()
         self._shown_id_order: deque[int] = deque()
 
@@ -187,6 +190,20 @@ class RateGroupReader:
         if deleted_ids:
             self.state_callback("rate_group_message_deleted", {"ids": deleted_ids})
 
+    @staticmethod
+    async def _disconnect_to_completion(client) -> None:
+        """Finish disconnecting even if another stop request cancels us meanwhile."""
+        disconnecting = asyncio.ensure_future(client.disconnect())
+        while not disconnecting.done():
+            try:
+                await asyncio.shield(disconnecting)
+            except asyncio.CancelledError:
+                continue
+        try:
+            disconnecting.result()
+        except Exception as exc:
+            logger.warning("Rate-group reader disconnect failed (%s)", type(exc).__name__)
+
     async def _run_async(self) -> None:
         failed = False
         try:
@@ -229,9 +246,10 @@ class RateGroupReader:
                 f"ERROR · {type(exc).__name__} · POSTS MAY BE OLD",
             )
         finally:
+            # The only place the client is disconnected and its session closed (reader thread).
             client = self._client
             if client and client.is_connected():
-                await client.disconnect()
+                await self._disconnect_to_completion(client)
             if not failed:
                 self.state_callback(
                     "rate_group_status",
@@ -239,12 +257,26 @@ class RateGroupReader:
                 )
 
     def _run(self) -> None:
-        self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self._loop)
+        # The Telethon client and its SQLite session belong to this thread only. Other threads
+        # never call client methods: stop() cancels the task below on this loop, and the finally
+        # block in _run_async is the only place that disconnects and closes the session.
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
-            self._loop.run_until_complete(self._run_async())
+            with self._task_lock:
+                if self._stop_requested.is_set():
+                    return
+                self._loop = loop
+                self._task = loop.create_task(self._run_async())
+            try:
+                loop.run_until_complete(self._task)
+            except asyncio.CancelledError:
+                pass
         finally:
-            self._loop.close()
+            with self._task_lock:
+                self._task = None
+                self._loop = None
+            loop.close()
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -257,8 +289,17 @@ class RateGroupReader:
         self._thread.start()
 
     def stop(self, wait: bool = True) -> None:
-        self._stop_requested.set()
-        if self._client and self._loop and self._loop.is_running() and self._client.is_connected():
-            asyncio.run_coroutine_threadsafe(self._client.disconnect(), self._loop)
-        if wait and self._thread:
-            self._thread.join(timeout=15)
+        """Ask the reader thread to finish; safe to call from any thread, at any stage."""
+        with self._task_lock:
+            self._stop_requested.set()
+            task, loop = self._task, self._loop
+            if task is not None and loop is not None:
+                try:
+                    loop.call_soon_threadsafe(task.cancel)
+                except RuntimeError:
+                    pass  # The loop has already closed; the reader is finishing on its own.
+        thread = self._thread
+        if wait and thread and thread is not threading.current_thread():
+            thread.join(timeout=STOP_JOIN_TIMEOUT_SECONDS)
+            if thread.is_alive():
+                logger.warning("Rate-group reader did not stop within %s s", STOP_JOIN_TIMEOUT_SECONDS)
