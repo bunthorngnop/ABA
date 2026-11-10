@@ -17,3 +17,16 @@ logs/*.log*
 *.session-journal
 *.session-shm
 *.session-wal
+.venv*/
+.sync-url-test-*/
+
+# Owner source images and working documents (derived assets live in assets/)
+*.jfif
+*.docx
+/nbc_logo.png
+
+# Review material and agent reports (kept in Dropbox, not in Git)
+reports/
+SYSTEM_BRIEF_FOR_REVIEW.md
+PRODUCTION_STATUS_REPORT.md
+ARCHITECTURE_REVIEW.md
