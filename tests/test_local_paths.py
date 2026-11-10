@@ -18,3 +18,4 @@ def test_database_path_expands_localappdata(tmp_path, monkeypatch):
     settings = load_settings(str(env))
 
     assert settings.database_path == Path(local) / "ABA Payment Speaker" / "state.sqlite3"
+    assert settings.rate_group_session_path == Path(local) / "ABA Payment Speaker" / "rate_group_user.session"
