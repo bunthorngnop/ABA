@@ -68,6 +68,12 @@ RATE_CARD_TITLE = "អត្រាប្តូរប្រាក់ រៀល �
 # Narrow cards: two centred lines rather than an unreadably small single line.
 RATE_CARD_TITLE_TWO_LINES = "អត្រាប្តូរប្រាក់\nរៀល ដុល្លារ និងយ័ន (ចិន)"
 RATE_CARD_TITLE_MIN_ONE_LINE = 8
+# Payment-card identity boxes (owner-approved 2026-11-12): Khmer headings, text centred.
+SENDER_HEADING = "● បានទទួលប្រាក់ពីឈ្មោះ"
+BANK_HEADING = "▥ ផ្ទេរមកពីធនាគារ"
+# Bokor was tried first but is too thin to read at 9 pt, so Siemreap regular is used (owner's fallback).
+IDENTITY_HEADING_FONTS = ("Siemreap",)
+SENDER_NAME_FONT = "Khmer OS Muol Light"
 # The USD/CNY figure fills its own cell: largest size that fits, never resizing the row or columns.
 CNY_FIGURE_MAX_SIZE = 44
 CNY_FIGURE_SAMPLE = "6.7174"
@@ -679,6 +685,7 @@ class Dashboard:
         self.caption_font = self._installed_font("Orbitron")
         self.label_font = self._installed_font("Montserrat")
         self.condensed_font = self._installed_font("Bahnschrift SemiCondensed")
+        self.sender_name_font = self._installed_font(SENDER_NAME_FONT)
         self._cambodia_flag = cambodia_flag_image(self.root, CAMBODIA_FLAG_HEIGHTS[False])
         self._nbc_logos = {
             narrow: load_asset_image(self.root, f"nbc_logo_{height}.png") or load_nbc_logo(self.root, height)
@@ -722,6 +729,13 @@ class Dashboard:
         self._refresh_operational_data()
         self._tick_clock()
         self.root.after(200, self._drain_events)
+
+    def _identity_heading_font(self) -> Optional[str]:
+        installed = {name.casefold(): name for name in tkfont.families(self.root)}
+        for family in IDENTITY_HEADING_FONTS:
+            if family.casefold() in installed:
+                return installed[family.casefold()]
+        return self.rate_group_font
 
     def _font(self, size: int, weight: str = "normal", family: Optional[str] = None) -> tuple[str, int, str]:
         return (family or "Segoe UI", size, weight)
@@ -838,14 +852,24 @@ class Dashboard:
         self.amount_label.pack(side="left")
         identity = tk.Frame(payment, bg=COLORS["surface"]); identity.grid(row=2, column=0, sticky="ew", padx=18, pady=(4, 8))
         identity.grid_columnconfigure(0, weight=1, uniform="identity"); identity.grid_columnconfigure(1, weight=1, uniform="identity")
-        sender = tk.Frame(identity, bg=COLORS["blue_dark"], padx=16, pady=11); sender.grid(row=0, column=0, sticky="nsew", padx=(0, 7)); self.sender_card = sender
-        self._label(sender, "● FROM (SENDER)", size=9, color="blue", weight="bold").pack(anchor="w")
-        self.sender_label = self._label(sender, variable=self.values["payer"], size=21, color="blue", weight="bold", anchor="w", justify="left", wraplength=220)
-        self.sender_label.pack(fill="both", expand=True, pady=(3, 0))
-        bank = tk.Frame(identity, bg=COLORS["purple_dark"], padx=16, pady=11); bank.grid(row=0, column=1, sticky="nsew", padx=(7, 0)); self.bank_card = bank
-        self._label(bank, "▥ FROM BANK", size=9, color="purple", weight="bold").pack(anchor="w")
-        self.bank_label = self._label(bank, variable=self.values["bank"], size=21, color="purple", weight="bold", anchor="w", justify="left", wraplength=220)
-        self.bank_label.pack(fill="both", expand=True, pady=(3, 0))
+        sender = tk.Frame(identity, bg=COLORS["blue_dark"], padx=16, pady=7); sender.grid(row=0, column=0, sticky="nsew", padx=(0, 7)); self.sender_card = sender
+        heading_font = self._identity_heading_font()
+        # The Khmer fonts have taller lines, so the spacing around them is trimmed to keep the card height.
+        self.sender_heading_label = self._label(sender, SENDER_HEADING, size=9, color="blue", family=heading_font, anchor="center", pady=0, bd=0)
+        self.sender_heading_label.pack(anchor="center")
+        self.sender_label = self._label(
+            sender, variable=self.values["payer"], size=21, color="blue", family=self.sender_name_font,
+            anchor="center", justify="center", wraplength=220, bd=0, pady=0,
+        )
+        self.sender_label.pack(fill="both", expand=True, pady=0)
+        bank = tk.Frame(identity, bg=COLORS["purple_dark"], padx=16, pady=7); bank.grid(row=0, column=1, sticky="nsew", padx=(7, 0)); self.bank_card = bank
+        self.bank_heading_label = self._label(bank, BANK_HEADING, size=9, color="purple", family=heading_font, anchor="center", pady=0, bd=0)
+        self.bank_heading_label.pack(anchor="center")
+        self.bank_label = self._label(
+            bank, variable=self.values["bank"], size=21, color="purple", weight="bold",
+            anchor="center", justify="center", wraplength=220, bd=0, pady=0,
+        )
+        self.bank_label.pack(fill="both", expand=True, pady=0)
         side = tk.Frame(body, bg=COLORS["background"]); side.grid(row=0, column=1, rowspan=2, sticky="nsew", padx=(0, 10), pady=(8, 0)); self.dashboard_side = side
         side.grid_columnconfigure(0, weight=1); side.grid_rowconfigure(0, weight=1)
         self._build_exchange_rate_card(side)
@@ -1943,8 +1967,8 @@ class Dashboard:
         self.rate_status_label.configure(font=self._font(6 if narrow_header else 7, "bold"))
         self.rate_group_button.configure(font=self._font(6 if narrow_header else 7, "bold"))
         for card in (self.sender_card, self.bank_card):
-            card.configure(padx=12 if compact else 16, pady=4 if compact else 6)
-        self.sender_label.configure(font=self._font(18 if compact else 21, "bold"))
+            card.configure(padx=12 if compact else 16, pady=2 if compact else 3)
+        self.sender_label.configure(font=self._font(18 if compact else 21, "normal", self.sender_name_font))
         self.bank_label.configure(font=self._font(18 if compact else 21, "bold"))
         self.payment_card.grid_rowconfigure(1, minsize=80 if mode == "short" else 90 if compact else 96)
         if compact:
