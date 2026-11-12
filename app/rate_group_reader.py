@@ -127,7 +127,7 @@ class RateGroupReader:
         return True
 
     async def _find_target_group(self):
-        """Find the private group (required) and the Ministry fuel channel (optional) in one pass."""
+        """Find the private group (required) and the fuel-price channel (optional) in one pass."""
         client = self._client
         if client is None:
             raise RuntimeError("Telegram client is not initialized")
@@ -154,7 +154,7 @@ class RateGroupReader:
         )
         if prices is None:
             return False
-        logger.info("Fuel prices read from the Ministry channel (valid from %s)", prices.valid_from or "?")
+        logger.info("Fuel prices read from the fuel channel (valid from %s)", prices.valid_from or "?")
         self.state_callback("fuel_prices", prices.as_dict())
         return True
 
@@ -164,11 +164,11 @@ class RateGroupReader:
         try:
             self._publish_fuel_post(event.message)
         except Exception as exc:
-            logger.warning("Could not read a Ministry fuel post (%s)", type(exc).__name__)
+            logger.warning("Could not read a fuel-channel post (%s)", type(exc).__name__)
 
     async def _load_latest_fuel_post(self, client) -> None:
         if self._fuel_channel is None:
-            logger.warning("Ministry fuel channel is not available to the rate-group account")
+            logger.warning("Fuel-price channel is not available to the rate-group account")
             return
         client.add_event_handler(self._handle_fuel_post, events.NewMessage(chats=self._fuel_channel))
         client.add_event_handler(self._handle_fuel_post, events.MessageEdited(chats=self._fuel_channel))
@@ -179,13 +179,13 @@ class RateGroupReader:
                     return
             oldest = min((m.date for m in messages if getattr(m, "date", None) is not None), default=None)
             logger.warning(
-                "No fuel-price post found in the latest Ministry channel messages (%s; oldest %s)",
+                "No fuel-price post found in the latest fuel-channel messages (%s; oldest %s)",
                 ", ".join(f"{key}={value}" for key, value in fuel_post_counts(
                     getattr(m, "message", None) for m in messages).items()),
                 oldest.astimezone(CAMBODIA_TIMEZONE).strftime("%Y-%m-%d %H:%M") if oldest else "?",
             )
         except Exception as exc:
-            logger.warning("Could not read Ministry fuel history (%s)", type(exc).__name__)
+            logger.warning("Could not read fuel-channel history (%s)", type(exc).__name__)
 
     async def _publish_message(self, message, edited: bool = False) -> None:
         message_id = int(message.id)

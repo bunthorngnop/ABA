@@ -1,4 +1,4 @@
-"""Regular-petrol and diesel pump prices from the Ministry of Commerce Telegram channel.
+"""Regular-petrol and diesel pump prices from the owner-chosen fuel-price Telegram channel.
 
 Display only: the dashboard ticker shows the latest សាំង and ម៉ាស៊ូត prices. Nothing here is
 used for payments. Example post (owner-provided public announcement):
@@ -13,8 +13,9 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-# Official Ministry of Commerce Telegram channel (owner-provided).
-FUEL_CHANNEL_ID = -1001254362029
+# Fuel-price Telegram channel (owner-provided 2026-11-12; replaces the Ministry channel -1001254362029,
+# whose posts carry the prices only inside the image).
+FUEL_CHANNEL_ID = -1003653280106
 # The channel also posts daily commodity prices, so look well back for the last announcement.
 FUEL_HISTORY_MESSAGES = 200
 FUEL_PRICE_MIN = 2_000
