@@ -255,7 +255,13 @@ def test_rates_table_with_official_cny_row_and_nbc_glass_card_show_figures_and_a
         assert str(cny["category"].cget("image"))  # the supplied logo, like the bank rows
         cny_font = tkfont.Font(root=dashboard.root, font=cny["official"].cget("font"))
         bank_font = tkfont.Font(root=dashboard.root, font=labels["ACLEDA"]["buy"].cget("font"))
-        assert (cny_font.cget("size"), cny_font.cget("family")) == (bank_font.cget("size"), bank_font.cget("family"))
+        # The lone figure fills its own cell: at least the bank size, as large as fits, never overflowing.
+        assert cny_font.cget("family") == bank_font.cget("family")
+        assert cny_font.cget("size") > bank_font.cget("size")
+        cell = cny["official_cell"]
+        content = cny["official"].master.master
+        dashboard.root.update_idletasks()
+        assert content.winfo_reqwidth() <= cell.winfo_width() and content.winfo_reqheight() <= cell.winfo_height()
         unit_font = tkfont.Font(root=dashboard.root, font=cny["unit"].cget("font"))
         assert unit_font.cget("size") < cny_font.cget("size")  # small yuan sign
         assert labels["ACLEDA"]["buy_arrow"].cget("text") == "▼"
@@ -713,3 +719,29 @@ def test_history_columns_align_and_long_text_wraps_to_two_lines():
             assert abs(label.winfo_rootx() - heading.winfo_rootx()) <= 2
     finally:
         dashboard.root.destroy()
+
+
+
+def test_cny_figure_grows_to_fill_its_cell_without_resizing_rows():
+    """The USD/CNY figure is as large as its cell allows at every window size; rows keep their size."""
+    for geometry in ("900x600", "1180x800", "1382x744"):
+        plain = _make_dashboard(initial_exchange_rates={k: v for k, v in _rates().items() if k != "CNY"})
+        try:
+            _layout(plain, geometry)
+            plain_rows = [plain.rate_display_labels[s]["row"].winfo_height() for s in ("ACLEDA", "WING", "CNY")]
+        finally:
+            plain.root.destroy()
+        dashboard = _make_dashboard(initial_exchange_rates=_rates())
+        try:
+            _layout(dashboard, geometry)
+            cny = dashboard.rate_display_labels["CNY"]
+            rows = [dashboard.rate_display_labels[s]["row"].winfo_height() for s in ("ACLEDA", "WING", "CNY")]
+            assert rows == plain_rows  # a bigger figure never changes any row height
+            cell, content = cny["official_cell"], cny["official"].master.master
+            assert content.winfo_reqwidth() <= cell.winfo_width()
+            assert content.winfo_reqheight() <= cell.winfo_height()
+            size = tkfont.Font(root=dashboard.root, font=cny["official"].cget("font")).cget("size")
+            assert dashboard._cny_fits(size, "6.7174", cell.winfo_width(), cell.winfo_height())
+            assert size == 44 or not dashboard._cny_fits(size + 1, "6.7174", cell.winfo_width(), cell.winfo_height())
+        finally:
+            dashboard.root.destroy()

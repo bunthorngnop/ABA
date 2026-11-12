@@ -68,6 +68,9 @@ RATE_CARD_TITLE = "អត្រាប្តូរប្រាក់ រៀល �
 # Narrow cards: two centred lines rather than an unreadably small single line.
 RATE_CARD_TITLE_TWO_LINES = "អត្រាប្តូរប្រាក់\nរៀល ដុល្លារ និងយ័ន (ចិន)"
 RATE_CARD_TITLE_MIN_ONE_LINE = 8
+# The USD/CNY figure fills its own cell: largest size that fits, never resizing the row or columns.
+CNY_FIGURE_MAX_SIZE = 44
+CNY_FIGURE_SAMPLE = "6.7174"
 NBC_CARD_HEIGHTS = {False: 132, True: 112}
 NBC_CARD_FILL = "#0E1626"
 NBC_BORDER_GRADIENT = ("#22D3EE", "#8B5CF6")
@@ -987,6 +990,8 @@ class Dashboard:
         arrow.pack(side="left", padx=(4, 0))
         caption = self._label(inner, "", size=7, color="muted", anchor="center")
         caption.pack()
+        # The figure floats in the cell (place), so its size never changes the row or the columns.
+        cell.bind("<Configure>", lambda _event: self._fit_cny_figure(), add="+")
         self.rate_display_labels["CNY"] = {
             "row": bank_cell,
             "bank": bank_label,
@@ -1985,10 +1990,46 @@ class Dashboard:
             self._rate_figure_size = size
             for figure, _cell in cells:
                 figure.configure(font=self._font(size, "bold", self.figure_font))
-            cny = self.rate_display_labels.get("CNY")
-            if cny is not None:  # same figure size as the bank rows above
-                cny["official"].configure(font=self._font(size, "bold", self.figure_font))
+            self._cny_figure_key = None  # refit the USD/CNY figure against the new bank size
         self._fit_cny_label()
+        self._fit_cny_figure()
+
+    def _fit_cny_figure(self) -> None:
+        """Grow the lone USD/CNY figure to the largest size that fits its cell (width and height)."""
+        cny = self.rate_display_labels.get("CNY")
+        if cny is None:
+            return
+        cell = cny["official_cell"]
+        width, height = cell.winfo_width(), cell.winfo_height()
+        if width <= 1 or height <= 1:
+            return
+        text = cny["official"].cget("text")
+        text = text if text not in {"", "—"} else CNY_FIGURE_SAMPLE
+        floor = getattr(self, "_rate_figure_size", None) or 12
+        size = CNY_FIGURE_MAX_SIZE
+        while size > floor and not self._cny_fits(size, text, width, height):
+            size -= 1
+        key = (size, width, height)
+        if getattr(self, "_cny_figure_key", None) == key:
+            return
+        self._cny_figure_key = key
+        small = max(7, size * 11 // 20)
+        cny["official"].configure(font=self._font(size, "bold", self.figure_font))
+        cny["unit"].configure(font=self._font(small, "bold", self.figure_font), pady=0)
+        cny["unit"].pack_configure(pady=(0, max(2, size // 6)))
+        cny["official_arrow"].configure(font=self._font(small, "bold"))
+        cny["caption"].configure(font=self._font(max(7, size // 4)))
+
+    def _cny_fits(self, size: int, text: str, width: int, height: int) -> bool:
+        """Whether the figure, small ¥, arrow and caption fit a cell of width × height at `size`."""
+        small = max(7, size * 11 // 20)
+        figure_font = tkfont.Font(root=self.root, family=self.figure_font, size=size, weight="bold")
+        small_font = tkfont.Font(root=self.root, family=self.figure_font, size=small, weight="bold")
+        arrow_font = tkfont.Font(root=self.root, family="Segoe UI", size=small, weight="bold")
+        caption_font = tkfont.Font(root=self.root, family="Segoe UI", size=max(7, size // 4))
+        line_width = figure_font.measure(text) + 3 + small_font.measure("¥") + 4 + arrow_font.measure("▲")
+        line_height = figure_font.metrics("linespace") + caption_font.metrics("linespace")
+        return line_width <= width - 16 and line_height <= height - 8
 
     def _fit_cny_label(self) -> None:
         """"USD/CNY" is longer than the bank names: shrink it (never the cell) to fit its column."""
@@ -2040,10 +2081,7 @@ class Dashboard:
                 parts["value"].configure(font=self._font(figure_size, "bold", self.figure_font))
                 parts["name"].configure(font=self._font(GOLD_UNIT_NAME_SIZES[narrow], "bold", self.rate_group_font))
                 parts["arrow"].configure(font=self._font(arrow_size, "bold"), padx=0)
-        cny = self.rate_display_labels.get("CNY")
-        if cny is not None:
-            cny["unit"].configure(font=self._font(arrow_size, "bold", self.figure_font))
-            cny["caption"].configure(font=self._font(6 if narrow else 7))
+        self._cny_figure_key = None
         for column, header in self.rate_table_headers.items():
             family = None if column == 0 else self.khmer_title_font
             header.configure(font=self._font(8 if narrow else 9, "bold", family))

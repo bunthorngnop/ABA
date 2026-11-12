@@ -374,6 +374,10 @@ This mechanism applies when Codex is actively working in this repository. It can
 
 ## Conversation and Decision Log
 
+### 2026-11-12 — Larger USD/CNY figure (workspace, awaiting deploy approval)
+
+- Owner asked for the lone yuan rate to be as large as possible within its row without affecting other rows or columns. Implemented: `_fit_cny_figure` / `_cny_fits` pick the largest size (up to 44 pt, never below the bank-figure size) at which the figure, small `¥`, arrow and caption fit the cell; the content is placed (not packed) in the cell so the row and columns never resize; refits on cell resize and layout changes. Preview: about 40 pt at 1382×744 and about 22 pt at 900×600. New test checks every row height is identical with and without the CNY rate, the content fits, and the size is the largest that fits. Workspace suite 288 passed. Committed locally; not deployed or pushed.
+
 ### 2026-11-12 — Rates card third row: official USD/CNY replaces gold
 
 - Discussion: owner asked to replace the gold row (gold is already in the ticker) with a USD/CNY row, keeping the ACLEDA and WING rows untouched, and to retitle the card `អត្រាប្តូរប្រាក់ រៀល ដុល្លារ និងយ័ន (ចិន)`. Options offered: ACLEDA's USD/CNY buy/sell, PBOC official central parity, or Bank of China rates. Owner chose B (official PBOC/CFETS central parity) with a small `¥`. The supplied `pboc_logo.png` turned out to be a WebP of the Bank of China logo (not the People's Bank of China); agent pointed this out; owner decided the official rate matters most and to use the supplied logo. The caption `PBOC central rate · <date>` names the actual source.
