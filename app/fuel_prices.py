@@ -15,7 +15,8 @@ from typing import Optional
 
 # Official Ministry of Commerce Telegram channel (owner-provided).
 FUEL_CHANNEL_ID = -1001254362029
-FUEL_HISTORY_MESSAGES = 30
+# The channel also posts daily commodity prices, so look well back for the last announcement.
+FUEL_HISTORY_MESSAGES = 200
 FUEL_PRICE_MIN = 2_000
 FUEL_PRICE_MAX = 10_000
 # Without an end date, prices count as old after one 10-day cycle plus a day.
@@ -32,13 +33,30 @@ KHMER_MONTHS = {
     "កក្កដា": 7, "សីហា": 8, "កញ្ញា": 9, "តុលា": 10, "វិច្ឆិកា": 11, "ធ្នូ": 12,
 }
 _NUMBER = r"[0-9](?:[0-9]|[ ,. ](?=[0-9]))*"
+_DIESEL_WORDS = ("ម៉ាស៊ូត", "ម៉ាស៊ុត", "ម៉ាសូត")
 _PRICE_LINE = re.compile(
-    rf"(?P<fuel>សាំង|ម៉ាស៊ូត)\s*[=:៖]\s*(?P<price>{_NUMBER})\s*រៀល(?P<rest>[^\n]*)"
+    rf"(?P<fuel>សាំង|{'|'.join(_DIESEL_WORDS)})\s*[=:៖]?\s*(?P<price>{_NUMBER})\s*រៀល(?P<rest>[^\n]*)"
 )
 _CHANGE = re.compile(rf"(?P<direction>ចុះថ្លៃ|ឡើងថ្លៃ)\s*(?P<amount>{_NUMBER})?")
 _UNCHANGED = re.compile(r"នៅដដែល|មិនប្រែប្រួល|ថេរ")
 _DATE = re.compile(r"ថ្ងៃទី\s*(?P<day>[0-9]{1,2})\s*ខែ\s*(?P<month>[^\s0-9]+?)\s*ឆ្នាំ\s*(?P<year>[0-9]{4})")
-_HEADER = "ប្រេងឥន្ធនៈ"
+_HEADER = "ប្រេងឥន្ធន"  # also matches the ឥន្ធនះ spelling
+
+
+def fuel_post_counts(texts) -> dict[str, int]:
+    """Structure-only counts for logging why no announcement was found (never any post text)."""
+    counts = {"posts": 0, "with_text": 0, "fuel_word": 0, "regular_word": 0, "diesel_word": 0, "price_lines": 0}
+    for text in texts:
+        counts["posts"] += 1
+        if not isinstance(text, str) or not text.strip():
+            continue
+        normalized = _normalize(text)
+        counts["with_text"] += 1
+        counts["fuel_word"] += _HEADER in normalized
+        counts["regular_word"] += "សាំង" in normalized
+        counts["diesel_word"] += any(word in normalized for word in _DIESEL_WORDS)
+        counts["price_lines"] += len(_PRICE_LINE.findall(normalized))
+    return counts
 
 
 @dataclass(frozen=True)
@@ -84,12 +102,12 @@ def _normalize(text: str) -> str:
 
 def parse_fuel_post(text: object, message_id: int = 0, posted_at: str = "") -> Optional[FuelPrices]:
     """Return regular and diesel prices from a Ministry announcement, or None for any other post."""
-    if not isinstance(text, str) or _HEADER not in text:
+    if not isinstance(text, str):
         return None
     normalized = _normalize(text)
     found: dict[str, tuple[int, Optional[int]]] = {}
     for match in _PRICE_LINE.finditer(normalized):
-        fuel = REGULAR if match.group("fuel") == "សាំង" else DIESEL
+        fuel = REGULAR if match.group("fuel") == "សាំង" else DIESEL  # any diesel spelling
         if fuel in found:
             continue
         price = _number(match.group("price"))

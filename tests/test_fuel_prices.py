@@ -15,6 +15,7 @@ from app.fuel_prices import (
     FUEL_CHANNEL_ID,
     FuelPrices,
     fuel_period_text,
+    fuel_post_counts,
     fuel_prices_are_stale,
     merge_with_previous,
     parse_fuel_post,
@@ -153,7 +154,7 @@ def test_reader_publishes_newest_ministry_post_from_history_and_listens_for_more
     fuel_events = [value for name, value in events if name == "fuel_prices"]
     assert [value["message_id"] for value in fuel_events] == [79]
     assert fuel_events[0]["regular"] == 4350 and fuel_events[0]["posted_at"] == "2026-11-11T13:00:00+07:00"
-    assert client.history_requests == [("ministry", 30)]
+    assert client.history_requests == [("ministry", 200)]
     assert len(client.handlers) == 2  # new and edited Ministry posts
 
 
@@ -178,3 +179,16 @@ def test_missing_ministry_channel_does_not_stop_the_private_reader(tmp_path):
 
     asyncio.run(run())
     assert client.handlers == [] and client.history_requests == []
+
+
+def test_spelling_variants_without_header_or_equals_sign_still_parse():
+    prices = parse_fuel_post("តម្លៃប្រេងឥន្ធនះ\nសាំង ៤ ៣៥០ រៀល\nម៉ាស៊ុត ៥ ៣០០ រៀល")
+    assert (prices.regular, prices.diesel) == (4350, 5300)
+    assert (prices.regular_change, prices.diesel_change) == (None, None)
+
+
+def test_post_counts_describe_structure_only():
+    counts = fuel_post_counts([MINISTRY_POST, "ផ្សេងៗ", None, ""])
+    assert counts == {
+        "posts": 4, "with_text": 2, "fuel_word": 1, "regular_word": 1, "diesel_word": 1, "price_lines": 2,
+    }

@@ -12,7 +12,7 @@ from telethon.errors import SessionPasswordNeededError
 
 from .config import Settings
 from .exchange_rates import CAMBODIA_TIMEZONE
-from .fuel_prices import FUEL_CHANNEL_ID, FUEL_HISTORY_MESSAGES, parse_fuel_post
+from .fuel_prices import FUEL_CHANNEL_ID, FUEL_HISTORY_MESSAGES, fuel_post_counts, parse_fuel_post
 from .rate_post_format import NON_TEXT_PLACEHOLDER, PHOTO_PLACEHOLDER
 
 logger = logging.getLogger(__name__)
@@ -173,10 +173,17 @@ class RateGroupReader:
         client.add_event_handler(self._handle_fuel_post, events.NewMessage(chats=self._fuel_channel))
         client.add_event_handler(self._handle_fuel_post, events.MessageEdited(chats=self._fuel_channel))
         try:
-            for message in await client.get_messages(self._fuel_channel, limit=FUEL_HISTORY_MESSAGES):
+            messages = list(await client.get_messages(self._fuel_channel, limit=FUEL_HISTORY_MESSAGES))
+            for message in messages:
                 if self._publish_fuel_post(message):
                     return
-            logger.warning("No fuel-price post found in the latest Ministry channel messages")
+            oldest = min((m.date for m in messages if getattr(m, "date", None) is not None), default=None)
+            logger.warning(
+                "No fuel-price post found in the latest Ministry channel messages (%s; oldest %s)",
+                ", ".join(f"{key}={value}" for key, value in fuel_post_counts(
+                    getattr(m, "message", None) for m in messages).items()),
+                oldest.astimezone(CAMBODIA_TIMEZONE).strftime("%Y-%m-%d %H:%M") if oldest else "?",
+            )
         except Exception as exc:
             logger.warning("Could not read Ministry fuel history (%s)", type(exc).__name__)
 
