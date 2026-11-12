@@ -683,8 +683,37 @@ def test_ticker_sits_beside_the_tabs_scrolls_and_shows_fuel_prices():
             "valid_from": "2099-11-11", "valid_to": "2099-11-21", "message_id": 1, "posted_at": "",
         })
         dashboard._drain_events()
-        texts = [dashboard.ticker.itemcget(item, "text") for item in dashboard.ticker.find_withtag("ticker")]
+        texts = [dashboard.ticker.itemcget(item, "text") for item in dashboard.ticker.find_withtag("ticker")
+                 if dashboard.ticker.type(item) == "text"]
         assert "4,350៛" in texts and " ▼700" in texts
+        assert dashboard.ticker.find_withtag("gold_icon")  # drawn gold bar
     finally:
         dashboard.root.destroy()
     assert dashboard._ticker_after_id is None
+
+
+
+def test_history_columns_align_and_long_text_wraps_to_two_lines():
+    rows = [
+        {"amount": "25000", "currency": "KHR", "sender_name": "SOK DARA", "bank": "ABA",
+         "received_at": "2026-11-12T08:00:00+00:00"},
+        {"amount": "12.50", "currency": "USD", "sender_name": "NHEAN MONYRACHANA SOPHEAKTRA CHANRAKSMEY",
+         "bank": "FOREIGN TRADE BANK OF CAMBODIA", "received_at": "2026-11-12T08:01:00+00:00"},
+    ]
+    dashboard = _make_dashboard(recent_payments=lambda limit=1000: rows)
+    try:
+        _layout(dashboard, "1382x744")
+        dashboard._render_history(rows)
+        dashboard.root.update_idletasks()
+        lines = dashboard.history_inner.winfo_children()
+        assert [line.winfo_height() for line in lines] == [44, 68]
+        labels = lines[1].winfo_children()
+        assert [label.cget("anchor") for label in labels] == ["e", "w", "center", "e"]
+        assert [label.cget("justify") for label in labels] == ["right", "left", "center", "right"]
+        assert labels[1].cget("text").count("\n") == 1
+        assert [heading.cget("anchor") for heading in dashboard.history_heading_labels] == ["e", "w", "center", "e"]
+        for column, label in enumerate(labels):  # columns stay aligned with the headings
+            heading = dashboard.history_heading_labels[column]
+            assert abs(label.winfo_rootx() - heading.winfo_rootx()) <= 2
+    finally:
+        dashboard.root.destroy()

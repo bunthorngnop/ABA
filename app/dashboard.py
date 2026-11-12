@@ -22,7 +22,7 @@ from .exchange_rates import (
     gold_local_units,
     rate_trend,
 )
-from .fuel_prices import FUEL_LABELS, FuelPrices, fuel_period_text, fuel_prices_are_stale
+from .fuel_prices import FuelPrices, fuel_period_khmer, fuel_prices_are_stale
 from .models import ParserStatus
 from .payment_parser import build_announcement, parse_payment
 from .rate_post_format import (
@@ -71,6 +71,10 @@ NBC_FIGURE_COLORS = {"up": "#4ADE80", "down": "#FACC15"}
 NBC_CARD_TITLE = "អត្រាប្តូរប្រាក់ធនាគារជាតិ"
 RATE_TABLE_HEADER_BG = "#22304A"
 HISTORY_ROW_HEIGHT = 44
+HISTORY_ROW_HEIGHT_TWO_LINES = 68
+# AMOUNT right, SENDER left, BANK centred, TIME right (owner-approved 2026-11-12).
+HISTORY_COLUMN_ANCHORS = ("e", "w", "center", "e")
+HISTORY_COLUMN_JUSTIFY = ("right", "left", "center", "right")
 # Scrolling ticker beside the DASHBOARD / SETTINGS tabs: today's totals and Ministry fuel prices.
 TICKER_INTERVAL_MS = 40
 TICKER_STEP_PX = 1.6  # about 40 px per second
@@ -346,14 +350,57 @@ def best_bank_rates(rates: dict[str, ExchangeRate], now: datetime) -> tuple[set[
     )
 
 
+def fit_two_lines(text: str, font: tkfont.Font, width: int) -> tuple[str, int]:
+    """Return (text, lines) so the text fits in at most two lines of `width` px, ending in … if cut."""
+    if width <= 0 or font.measure(text) <= width:
+        return text, 1
+    words = text.split()
+    first = ""
+    for index, word in enumerate(words):
+        candidate = f"{first} {word}".strip()
+        if font.measure(candidate) > width:
+            break
+        first = candidate
+    else:
+        index = len(words)
+    rest = " ".join(words[index:]) if first else text
+    if not first:  # one very long word: split it by characters
+        cut = len(text)
+        while cut > 1 and font.measure(text[:cut]) > width:
+            cut -= 1
+        first, rest = text[:cut], text[cut:]
+    if font.measure(rest) > width:
+        while rest and font.measure(rest + "…") > width:
+            rest = rest[:-1]
+        rest = rest.rstrip() + "…"
+    return f"{first}\n{rest}", 2
+
+
 def _is_khmer(text: str) -> bool:
     return any("\u1780" <= character <= "\u17ff" for character in text)
 
 
+# Ticker labels (owner-approved wording, Western digits).
+TICKER_FUEL_LABELS = {"regular": "តម្លៃសាំងធម្មតា", "diesel": "តម្លៃប្រេងម៉ាស៊ូត"}
+TICKER_GOLD_ICON = "gold_icon"
+TICKER_GOLD_TEXT = "gold_shadow"  # gold text drawn with a dark drop shadow
+TICKER_GOLD_SHADOW = "#3B2A00"
+TICKER_GAP_TEXT = "          "
+
+
+def _ticker_arrow(change, stale: bool) -> tuple[str, str]:
+    """Fuel colours for every ticker arrow: ▲ red when the price rose, ▼ green when it fell."""
+    if change is None or change == 0:
+        return "", "muted"
+    up = change > 0 if not isinstance(change, str) else change == "up"
+    return ("▲" if up else "▼"), ("muted" if stale else ("red" if up else "green"))
+
+
 def ticker_segments(
     summary: dict[str, object], fuel: Optional[FuelPrices], today,
+    gold: Optional[ExchangeRate] = None, now: Optional[datetime] = None,
 ) -> list[tuple[str, str]]:
-    """(text, colour) pieces for the tab-bar ticker: today's totals, then regular and diesel prices."""
+    """(text, colour) pieces for the tab-bar ticker: today's totals, fuel prices, then gold."""
     try:
         khr = int(Decimal(str(summary.get("KHR", "0"))))
         usd = Decimal(str(summary.get("USD", "0")))
@@ -363,28 +410,45 @@ def ticker_segments(
     noun = "payment" if count == 1 else "payments"
     segments = [
         ("TODAY", "text"), (f"  {count} {noun}", "text"), ("  ·  ", "muted"),
-        (f"KHR {khr:,}", "green"), ("  ·  ", "muted"), (f"USD {usd:,.2f}", "green"),
-        ("          FUEL  ", "amber"),
+        (f"KHR {khr:,}", "green"), ("  ·  ", "muted"), (f"USD {usd:,.2f}", "usd"),
+        (TICKER_GAP_TEXT, "muted"),
     ]
     if fuel is None:
-        segments.append((f"{FUEL_LABELS['regular']} …  ·  {FUEL_LABELS['diesel']} …", "muted"))
+        segments.append((f"{TICKER_FUEL_LABELS['regular']} …  ·  {TICKER_FUEL_LABELS['diesel']} …", "muted"))
+    else:
+        stale = fuel_prices_are_stale(fuel, today)
+        price_color = "muted" if stale else "amber"
+        for index, key in enumerate(("regular", "diesel")):
+            if index:
+                segments.append(("  ·  ", "muted"))
+            segments.append((f"{TICKER_FUEL_LABELS[key]} ", price_color))
+            segments.append((f"{getattr(fuel, key):,}៛", price_color))
+            change = getattr(fuel, f"{key}_change")
+            arrow, arrow_color = _ticker_arrow(change, stale)
+            if arrow:
+                segments.append((f" {arrow}{abs(change):,}", arrow_color))
+        period = fuel_period_khmer(fuel)
+        if period:
+            segments.append(("  ·  ", "muted"))
+            segments.append((period, "muted" if stale else "text"))
+        if stale:
+            segments.append(("  · តម្លៃចាស់", "muted"))
+    segments.append((TICKER_GAP_TEXT, "muted"))
+    segments.append(("", TICKER_GOLD_ICON))
+    price = gold.official_rate if gold is not None else None
+    if price is None:
+        segments.append(("  ដំឡឹង …  ·  ជី …", "muted"))
         return segments
-    stale = fuel_prices_are_stale(fuel, today)
-    price_color = "muted" if stale else "amber"
-    for index, key in enumerate(("regular", "diesel")):
+    stale = gold.is_stale(now or datetime.now(CAMBODIA_TIMEZONE))
+    text_color = "muted" if stale else TICKER_GOLD_TEXT
+    arrow, arrow_color = _ticker_arrow(gold.trend("official"), stale)
+    for index, (unit, value) in enumerate(zip(("damlung", "chi"), gold_local_units(price))):
         if index:
             segments.append(("  ·  ", "muted"))
-        segments.append((f"{FUEL_LABELS[key]} ", price_color))
-        segments.append((f"{getattr(fuel, key):,}៛", price_color))
-        change = getattr(fuel, f"{key}_change")
-        if change:
-            arrow_color = "muted" if stale else ("red" if change > 0 else "green")
-            segments.append((f" {'▲' if change > 0 else '▼'}{abs(change):,}", arrow_color))
-    period = fuel_period_text(fuel)
-    if period:
-        segments.append((f"   ({period})", "muted"))
-    if stale:
-        segments.append(("  · OLD", "muted"))
+        segments.append(((" " if index == 0 else "") + f"≈ ${value:,.2f}", text_color))
+        segments.append((f" / {GOLD_UNIT_NAMES[unit]}", text_color))
+        if arrow:
+            segments.append((f" {arrow}", arrow_color))
     return segments
 
 
@@ -787,7 +851,8 @@ class Dashboard:
         self.history_headings = headings
         self._configure_history_columns(headings)
         self.history_heading_labels = []
-        for column, title, anchor in ((0, "AMOUNT", "w"), (1, "SENDER", "w"), (2, "BANK", "w"), (3, "TIME", "e")):
+        for column, title in enumerate(("AMOUNT", "SENDER", "BANK", "TIME")):
+            anchor = HISTORY_COLUMN_ANCHORS[column]
             heading = tk.Label(headings, text=title, bg=COLORS["surface_alt"], fg=COLORS["muted"], font=self._font(11, "bold"), anchor=anchor, padx=10)
             heading.grid(row=0, column=column, sticky="nsew"); self.history_heading_labels.append(heading)
         history_panel = tk.Frame(recent, bg=COLORS["surface"]); history_panel.grid(row=1, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 8)); history_panel.grid_columnconfigure(0, weight=1)
@@ -1400,9 +1465,12 @@ class Dashboard:
         self.ticker.update_idletasks()
         self._render_ticker(force=True)
 
+    def _current_ticker_segments(self) -> list[tuple[str, str]]:
+        now = datetime.now(CAMBODIA_TIMEZONE)
+        return ticker_segments(self._today_summary, self.fuel_prices, now.date(), self.exchange_rates.get("GOLD"), now)
+
     def ticker_text(self) -> str:
-        today = datetime.now(CAMBODIA_TIMEZONE).date()
-        return "".join(text for text, _color in ticker_segments(self._today_summary, self.fuel_prices, today))
+        return "".join(text for text, _color in self._current_ticker_segments())
 
     def _ticker_font(self, khmer: bool) -> tkfont.Font:
         if khmer not in self._ticker_fonts:
@@ -1414,7 +1482,7 @@ class Dashboard:
         if not hasattr(self, "ticker"):
             return
         today = datetime.now(CAMBODIA_TIMEZONE).date()
-        segments = ticker_segments(self._today_summary, self.fuel_prices, today)
+        segments = self._current_ticker_segments()
         canvas_width = self.ticker.winfo_width()
         canvas_height = self.ticker.winfo_height()
         key = (tuple(segments), canvas_width, canvas_height)
@@ -1427,7 +1495,13 @@ class Dashboard:
             self._ticker_cycle = 0.0
             return
         pieces = [(text, color, self._ticker_font(_is_khmer(text))) for text, color in segments]
-        content = sum(font.measure(text) for text, _color, font in pieces)
+        icon_height = max(14, min(26, canvas_height - 12))
+        icon_width = int(icon_height * 1.6)
+
+        def width_of(text: str, color: str, font: tkfont.Font) -> int:
+            return icon_width + 4 if color == TICKER_GOLD_ICON else font.measure(text)
+
+        content = sum(width_of(*piece) for piece in pieces)
         cycle = float(content + TICKER_GAP_PX)
         self._ticker_cycle = cycle
         if not -cycle < self._ticker_offset <= 0:
@@ -1436,9 +1510,36 @@ class Dashboard:
         x = self._ticker_offset
         for _copy in range(max(2, math.ceil(canvas_width / cycle) + 1)):
             for text, color, font in pieces:
-                self.ticker.create_text(x, y, text=text, fill=COLORS[color], font=font, anchor="w", tags=("ticker",))
-                x += font.measure(text)
+                if color == TICKER_GOLD_ICON:
+                    self._draw_gold_bar(x, y, icon_width, icon_height)
+                elif color == TICKER_GOLD_TEXT:
+                    self.ticker.create_text(x + 1, y + 2, text=text, fill=TICKER_GOLD_SHADOW, font=font, anchor="w", tags=("ticker",))
+                    self.ticker.create_text(x, y, text=text, fill=COLORS["usd"], font=font, anchor="w", tags=("ticker", "gold_text"))
+                else:
+                    self.ticker.create_text(x, y, text=text, fill=COLORS[color], font=font, anchor="w", tags=("ticker",))
+                x += width_of(text, color, font)
             x += TICKER_GAP_PX
+
+    def _draw_gold_bar(self, x: float, y: float, width: int, height: int) -> None:
+        """A small gold ingot: dark outline, bright top face, warm front face and a shine line."""
+        top, bottom = y - height / 2, y + height / 2
+        inset = width * 0.18
+        face_top = top + height * 0.38
+        tags = ("ticker", "gold_icon")
+        self.ticker.create_polygon(
+            x + inset, top, x + width - inset, top, x + width, face_top, x, face_top,
+            fill="#FFE08A", outline="#8A6410", width=1, tags=tags,
+        )
+        self.ticker.create_polygon(
+            x, face_top, x + width, face_top, x + width, bottom, x, bottom,
+            fill="#E0A82E", outline="#8A6410", width=1, tags=tags,
+        )
+        self.ticker.create_line(
+            x + inset + 2, top + 2, x + width * 0.55, top + 2, fill="#FFF7D6", width=2, tags=tags,
+        )
+        self.ticker.create_line(
+            x + 3, bottom - 3, x + width - 3, bottom - 3, fill="#B07D18", width=1, tags=tags,
+        )
 
     def _tick_ticker(self) -> None:
         self._ticker_after_id = None
@@ -1566,6 +1667,8 @@ class Dashboard:
 
     def _apply_history_columns(self, narrow: bool) -> None:
         self._configure_history_columns(self.history_headings, narrow)
+        if self.history_canvas.winfo_width() > 1:
+            self._fix_history_columns(self.history_headings, self._history_column_widths(narrow), spare=True)
         for column, label in enumerate(self.history_heading_labels):
             if column in (2, 3):
                 font = self._font(9, "bold", self.condensed_font) if narrow else self._font(11, "bold")
@@ -1575,9 +1678,37 @@ class Dashboard:
 
     def _resize_history(self, event) -> None:
         self.history_canvas.itemconfigure(self.history_window, width=event.width)
+        # Re-flow wrapped sender/bank text when the list width changes noticeably.
+        if self._history_rows and abs(event.width - getattr(self, "_history_render_width", 0)) > 8:
+            if getattr(self, "_history_rerender_id", None) is None:
+                self._history_rerender_id = self.root.after_idle(self._rerender_history)
+
+    def _rerender_history(self) -> None:
+        self._history_rerender_id = None
+        self._render_history(self._history_rows)
+
+    def _history_column_widths(self, narrow: bool) -> list[int]:
+        width = self.history_canvas.winfo_width()
+        amount, time_width = (118, 64) if narrow else (165, 110)
+        rest = max(0, width - amount - time_width)
+        return [amount, rest * 11 // 20, rest - rest * 11 // 20, time_width]
+
+    @staticmethod
+    def _fix_history_columns(parent, widths: list[int], spare: bool = False) -> None:
+        """Pin the four columns to the computed widths so rows and headings stay aligned.
+
+        The heading strip can be wider than the list (when the list scrollbar shows), so headings
+        put that extra width in an empty fifth column instead of widening a real column.
+        """
+        if not any(widths):
+            return
+        for column, width in enumerate(widths):
+            parent.grid_columnconfigure(column, minsize=width, weight=0 if spare else (1 if column == 1 else 0))
+        parent.grid_columnconfigure(4, weight=1 if spare else 0)
 
     def _history_overflows(self) -> bool:
-        return self._history_row_count * HISTORY_ROW_HEIGHT > int(self.history_canvas.cget("height"))
+        content = getattr(self, "_history_content_height", self._history_row_count * HISTORY_ROW_HEIGHT)
+        return content > int(self.history_canvas.cget("height"))
 
     def _update_history_scrollbar(self) -> None:
         if self._history_overflows():
@@ -1601,6 +1732,11 @@ class Dashboard:
         for child in self.history_inner.winfo_children():
             child.destroy()
         self._history_row_count = len(rows)
+        self._history_render_width = self.history_canvas.winfo_width()
+        column_widths = self._history_column_widths(narrow) if self._history_render_width > 1 else [0, 0, 0, 0]
+        padx = 6 if narrow else 10
+        content_height = 0
+        self._fix_history_columns(self.history_headings, column_widths, spare=True)
         if not rows:
             empty = tk.Label(self.history_inner, text="NO ANNOUNCED PAYMENTS TODAY", bg=COLORS["surface"], fg=COLORS["muted"], font=self._font(12, "bold"), anchor="center")
             empty.grid(row=0, column=0, sticky="nsew"); self.history_inner.grid_columnconfigure(0, weight=1); self._bind_history_scroll(empty)
@@ -1608,8 +1744,10 @@ class Dashboard:
             background = COLORS["surface"] if index % 2 == 0 else COLORS["surface_alt"]
             line = tk.Frame(self.history_inner, bg=background, height=HISTORY_ROW_HEIGHT)
             line.grid(row=index, column=0, sticky="ew"); line.grid_propagate(False)
+            line.grid_rowconfigure(0, weight=1)
             self.history_inner.grid_columnconfigure(0, weight=1)
             self._configure_history_columns(line, narrow)
+            self._fix_history_columns(line, column_widths)
             timestamp = str(row.get("received_at") or "")
             try: shown_time = datetime.fromisoformat(timestamp).astimezone().strftime("%I:%M %p")
             except (ValueError, TypeError): shown_time = "—"
@@ -1617,15 +1755,29 @@ class Dashboard:
             main_size = 13 if narrow else 14
             condensed = (self.condensed_font, 11) if narrow else (None, 14)
             values = (
-                (format_payment_amount(row.get("amount"), row.get("currency")), "w", self._font(main_size, "bold")),
-                (str(row.get("sender_name") or "—"), "w", self._font(main_size, "bold")),
-                (str(row.get("bank") or "OTHER BANK"), "w", self._font(condensed[1], "normal", condensed[0])),
-                (shown_time, "e", self._font(condensed[1], "normal", condensed[0])),
+                (format_payment_amount(row.get("amount"), row.get("currency")), self._font(main_size, "bold")),
+                (str(row.get("sender_name") or "—"), self._font(main_size, "bold")),
+                (str(row.get("bank") or "OTHER BANK"), self._font(condensed[1], "normal", condensed[0])),
+                (shown_time, self._font(condensed[1], "normal", condensed[0])),
             )
-            for column, (text, anchor, font) in enumerate(values):
-                label = tk.Label(line, text=text, bg=background, fg=row_foreground, font=font, anchor=anchor, padx=6 if narrow else 10)
+            lines = 1
+            fitted = []
+            for column, (text, font) in enumerate(values):
+                measured = tkfont.Font(root=self.root, font=font)
+                shown, needed = fit_two_lines(text, measured, column_widths[column] - 2 * padx - 4)
+                fitted.append((shown, font))
+                lines = max(lines, needed)
+            row_height = HISTORY_ROW_HEIGHT_TWO_LINES if lines > 1 else HISTORY_ROW_HEIGHT
+            line.configure(height=row_height)
+            content_height += row_height
+            for column, (text, font) in enumerate(fitted):
+                label = tk.Label(
+                    line, text=text, bg=background, fg=row_foreground, font=font,
+                    anchor=HISTORY_COLUMN_ANCHORS[column], justify=HISTORY_COLUMN_JUSTIFY[column], padx=padx, bd=0,
+                )
                 label.grid(row=0, column=column, sticky="nsew"); self._bind_history_scroll(label)
             self._bind_history_scroll(line)
+        self._history_content_height = content_height
         self._bind_history_scroll(self.history_canvas)
         self.history_inner.update_idletasks()
         self.history_canvas.configure(scrollregion=self.history_canvas.bbox("all"))
@@ -2296,6 +2448,7 @@ class Dashboard:
                 self._reload_nbc_history()
                 self._refresh_exchange_rate_display()
                 self._render_rate_group_messages(keep_scroll=True)
+                self._render_ticker()
             elif event == "fuel_prices" and isinstance(value, dict):
                 self.fuel_prices = FuelPrices.from_dict(value) or self.fuel_prices
                 self._render_ticker()

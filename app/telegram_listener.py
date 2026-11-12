@@ -75,6 +75,8 @@ class TelegramListener:
         self._client: Optional[TelegramClient] = None
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._task: Optional[asyncio.Task] = None
+        self._task_lock = threading.Lock()
 
     def _request_login_value(self, kind: str, prompt: str) -> str:
         responses: "queue.Queue[Optional[str]]" = queue.Queue(maxsize=1)
@@ -218,23 +220,62 @@ class TelegramListener:
                 health_task.cancel()
                 if not self._stopping:
                     self._report_health(False, "network")
+            # The only place the payment client is disconnected and its session closed (listener thread).
             if self._client and self._client.is_connected():
-                await self._client.disconnect()
+                await self._disconnect_to_completion(self._client)
             self.state_callback("telegram", "Disconnected")
 
+    @staticmethod
+    async def _disconnect_to_completion(client) -> None:
+        """Finish disconnecting even if another stop request cancels us meanwhile."""
+        disconnecting = asyncio.ensure_future(client.disconnect())
+        while not disconnecting.done():
+            try:
+                await asyncio.shield(disconnecting)
+            except asyncio.CancelledError:
+                continue
+        try:
+            disconnecting.result()
+        except Exception as exc:
+            logger.warning("Telegram user-session disconnect failed (%s)", type(exc).__name__)
+
     def run(self) -> None:
-        self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self._loop)
-        self._loop.run_until_complete(self._run_async())
-        self._loop.close()
+        # The Telethon client and its SQLite session belong to this thread only. stop() never calls
+        # client methods from another thread (Telethon would then disconnect on that thread and race
+        # this one on the session): it cancels the task below on this loop instead.
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            with self._task_lock:
+                if self._stopping:
+                    return
+                self._loop = loop
+                self._task = loop.create_task(self._run_async())
+            try:
+                loop.run_until_complete(self._task)
+            except asyncio.CancelledError:
+                pass
+        finally:
+            with self._task_lock:
+                self._task = None
+                self._loop = None
+            loop.close()
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self.run, name="telegram-user-listener", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
-        self._stopping = True
-        if self._client and self._loop and self._loop.is_running():
-            asyncio.run_coroutine_threadsafe(self._client.disconnect(), self._loop)
-        if self._thread:
-            self._thread.join(timeout=15)
+        with self._task_lock:
+            self._stopping = True
+            task, loop = self._task, self._loop
+            if task is not None and loop is not None:
+                try:
+                    loop.call_soon_threadsafe(task.cancel)
+                except RuntimeError:
+                    pass  # The loop has already closed; the listener is finishing on its own.
+        thread = self._thread
+        if thread and thread is not threading.current_thread():
+            thread.join(timeout=15)
+            if thread.is_alive():
+                logger.warning("Telegram user-session listener did not stop within 15 s")

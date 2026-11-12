@@ -6,14 +6,17 @@ variants in the same style. No private messages are used.
 
 import asyncio
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from types import SimpleNamespace
 
 from app.config import Settings
 from app.dashboard import ticker_segments
 from app.database import PaymentStore
+from app.exchange_rates import CAMBODIA_TIMEZONE, ExchangeRate
 from app.fuel_prices import (
     FUEL_CHANNEL_ID,
     FuelPrices,
+    fuel_period_khmer,
     fuel_period_text,
     fuel_post_counts,
     fuel_prices_are_stale,
@@ -74,27 +77,52 @@ def test_prices_turn_old_after_the_announced_period():
     assert fuel_prices_are_stale(undated, date(2026, 11, 23))
 
 
-def test_ticker_text_shows_totals_prices_arrows_and_colors():
+def gold_rate(price="2418.60", previous="2405.10", fetched=None):
+    return ExchangeRate(
+        "GOLD", "XAU/USD spot", Decimal(price), None, None, "12 Nov 2026 09:00",
+        fetched or datetime.now(CAMBODIA_TIMEZONE), previous_official_rate=Decimal(previous) if previous else None,
+    )
+
+
+def test_ticker_text_shows_totals_khmer_fuel_wording_and_gold():
     prices = parse_fuel_post(MINISTRY_POST)
-    segments = ticker_segments({"count": 23, "KHR": "1250000", "USD": "340"}, prices, date(2026, 11, 12))
+    segments = ticker_segments({"count": 23, "KHR": "1250000", "USD": "340"}, prices, date(2026, 11, 12), gold_rate())
     text = "".join(piece for piece, _color in segments)
     assert text.startswith("TODAY  23 payments  ·  KHR 1,250,000  ·  USD 340.00")
-    assert "សាំង 4,350៛ ▼700  ·  ម៉ាស៊ូត 5,300៛ ▼350   (11–21 Nov)" in text
+    assert ("តម្លៃសាំងធម្មតា 4,350៛ ▼700  ·  តម្លៃប្រេងម៉ាស៊ូត 5,300៛ ▼350  ·  "
+            "អនុវត្តចាប់ពីថ្ងៃទី 11 ដល់ 21 ខែវិច្ឆិកា ឆ្នាំ2026") in text
+    assert "≈ $2,915.99 / ដំឡឹង ▲  ·  ≈ $291.60 / ជី ▲" in text
     colors = dict(segments)
-    assert colors[" ▼700"] == "green" and colors["4,350៛"] == "amber" and colors["KHR 1,250,000"] == "green"
-    rise = FuelPrices(4450, 5300, 100, 0, "2026-12-01", "2026-12-10")
-    rise_colors = dict(ticker_segments({}, rise, date(2026, 12, 2)))
-    assert rise_colors[" ▲100"] == "red"
-    assert not any("▲" in piece or "▼" in piece for piece in rise_colors if "5,300" in piece)
+    assert colors["KHR 1,250,000"] == "green" and colors["USD 340.00"] == "usd"  # different colours
+    assert colors[" ▼700"] == "green" and colors["4,350៛"] == "amber"
+    assert colors[" ▲"] == "red"  # gold uses the fuel colours: up is red
+    assert colors[""] == "gold_icon" and colors[" ≈ $2,915.99"] == "gold_shadow"
+    assert text.index("តម្លៃសាំងធម្មតា") < text.index("ដំឡឹង")  # totals → fuel → gold
+
+
+def test_gold_down_is_green_and_rise_in_fuel_is_red():
+    colors = dict(ticker_segments({}, FuelPrices(4450, 5300, 100, 0, "2026-12-01", "2026-12-10"), date(2026, 12, 2),
+                                  gold_rate("2400", "2418.60")))
+    assert colors[" ▲100"] == "red"
+    assert colors[" ▼"] == "green"
+    assert not any("▲" in piece or "▼" in piece for piece in colors if "5,300" in piece)
 
 
 def test_ticker_marks_old_prices_and_waits_politely_without_any():
     prices = parse_fuel_post(MINISTRY_POST)
     old = ticker_segments({}, prices, date(2026, 11, 30))
-    assert old[-1] == ("  · OLD", "muted")
+    assert ("  · តម្លៃចាស់", "muted") in old
     assert all(color == "muted" for piece, color in old if "៛" in piece or "▼" in piece)
     waiting = "".join(piece for piece, _color in ticker_segments({}, None, date(2026, 11, 12)))
-    assert "សាំង …  ·  ម៉ាស៊ូត …" in waiting
+    assert "តម្លៃសាំងធម្មតា …  ·  តម្លៃប្រេងម៉ាស៊ូត …" in waiting
+    assert "ដំឡឹង …  ·  ជី …" in waiting
+
+
+def test_khmer_period_wording_uses_western_digits():
+    assert fuel_period_khmer(FuelPrices(1, 1, valid_from="2026-10-26", valid_to="2026-11-05")) == (
+        "អនុវត្តចាប់ពីថ្ងៃទី 26 ខែតុលា ដល់ថ្ងៃទី 5 ខែវិច្ឆិកា ឆ្នាំ2026"
+    )
+    assert fuel_period_khmer(FuelPrices(1, 1, valid_from="2026-11-11")) == "អនុវត្តចាប់ពីថ្ងៃទី 11 ខែវិច្ឆិកា ឆ្នាំ2026"
 
 
 def test_store_keeps_only_the_latest_fuel_prices(tmp_path):
@@ -190,5 +218,22 @@ def test_spelling_variants_without_header_or_equals_sign_still_parse():
 def test_post_counts_describe_structure_only():
     counts = fuel_post_counts([MINISTRY_POST, "ផ្សេងៗ", None, ""])
     assert counts == {
-        "posts": 4, "with_text": 2, "fuel_word": 1, "regular_word": 1, "diesel_word": 1, "price_lines": 2,
+        "posts": 4, "with_text": 2, "fuel_word": 1, "regular_word": 1, "diesel_word": 1,
+        "riel_word": 4, "equals": 2, "numbers": 6, "price_lines": 2,
     }
+
+
+def test_marks_typed_in_another_order_still_match():
+    # Same words as on screen, but with the vowel and sign marks stored in the opposite order.
+    regular = "\u179f\u17c6\u17b6\u1784"          # ស + ំ + ា + ង   (usual: ស + ា + ំ + ង)
+    diesel = "\u1798\u17b6\u17c9\u179f\u17bc\u17ca\u178f"  # ម + ា + ៉ + ស + ូ + ៊ + ត
+    assert regular != "សាំង" and diesel != "ម៉ាស៊ូត"
+    post = MINISTRY_POST.replace("សាំង", regular).replace("ម៉ាស៊ូត", diesel)
+    prices = parse_fuel_post(post)
+    assert (prices.regular, prices.regular_change, prices.diesel, prices.diesel_change) == (4350, -700, 5300, -350)
+    assert (prices.valid_from, prices.valid_to) == ("2026-11-11", "2026-11-21")
+
+
+def test_riel_sign_and_price_word_variants():
+    prices = parse_fuel_post("ប្រេងឥន្ធនៈ\nតម្លៃប្រេងសាំងធម្មតា ៖ ៤ ៣៥០៛ (ឡើងតម្លៃ ៥០ រៀល)\nតម្លៃប្រេងម៉ាស៊ូត ៖ ៥ ៣០០៛")
+    assert (prices.regular, prices.regular_change, prices.diesel, prices.diesel_change) == (4350, 50, 5300, None)

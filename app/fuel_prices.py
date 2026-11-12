@@ -27,25 +27,50 @@ DIESEL = "diesel"
 FUEL_LABELS = {REGULAR: "សាំង", DIESEL: "ម៉ាស៊ូត"}
 
 _KHMER_DIGITS = str.maketrans("០១២៣៤៥៦៧៨៩", "0123456789")
-_INVISIBLE = dict.fromkeys(map(ord, "​‌‍﻿"), None)
+_INVISIBLE = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff\u00ad"), None)
+# Khmer vowel signs and diacritics that follow a consonant. Keyboards may type them in different
+# orders (e.g. ា+ំ or ំ+ា) that look identical on screen, so runs of them are put in one order.
+_KHMER_MARKS = re.compile("[\u17b4-\u17d3\u17dd]{2,}")
+
+
+def _canonical(text: str) -> str:
+    return _KHMER_MARKS.sub(lambda match: "".join(sorted(match.group(0))), text)
+
+
+def _words(*words: str) -> str:
+    return "|".join(re.escape(_canonical(word)) for word in words)
+
+
 KHMER_MONTHS = {
     "មករា": 1, "កុម្ភៈ": 2, "មីនា": 3, "មេសា": 4, "ឧសភា": 5, "មិថុនា": 6,
     "កក្កដា": 7, "សីហា": 8, "កញ្ញា": 9, "តុលា": 10, "វិច្ឆិកា": 11, "ធ្នូ": 12,
 }
-_NUMBER = r"[0-9](?:[0-9]|[ ,. ](?=[0-9]))*"
+_MONTHS_CANONICAL = {_canonical(name): number for name, number in KHMER_MONTHS.items()}
+_NUMBER = r"[0-9](?:[0-9]|[ ,.\u00a0](?=[0-9]))*"
+_REGULAR_WORDS = ("សាំង",)
 _DIESEL_WORDS = ("ម៉ាស៊ូត", "ម៉ាស៊ុត", "ម៉ាសូត")
+_RIEL = _words("រៀល") + "|៛"
 _PRICE_LINE = re.compile(
-    rf"(?P<fuel>សាំង|{'|'.join(_DIESEL_WORDS)})\s*[=:៖]?\s*(?P<price>{_NUMBER})\s*រៀល(?P<rest>[^\n]*)"
+    rf"(?P<fuel>{_words(*_REGULAR_WORDS, *_DIESEL_WORDS)})[^\n0-9=:៖]{{0,40}}?\s*[=:៖]?\s*"
+    rf"(?P<price>{_NUMBER})\s*(?:{_RIEL})(?P<rest>[^\n]*)"
 )
-_CHANGE = re.compile(rf"(?P<direction>ចុះថ្លៃ|ឡើងថ្លៃ)\s*(?P<amount>{_NUMBER})?")
-_UNCHANGED = re.compile(r"នៅដដែល|មិនប្រែប្រួល|ថេរ")
-_DATE = re.compile(r"ថ្ងៃទី\s*(?P<day>[0-9]{1,2})\s*ខែ\s*(?P<month>[^\s0-9]+?)\s*ឆ្នាំ\s*(?P<year>[0-9]{4})")
-_HEADER = "ប្រេងឥន្ធន"  # also matches the ឥន្ធនះ spelling
+_REGULAR_CANONICAL = {_canonical(word) for word in _REGULAR_WORDS}
+_CHANGE = re.compile(rf"(?P<direction>{_words('ចុះថ្លៃ', 'ឡើងថ្លៃ', 'ចុះតម្លៃ', 'ឡើងតម្លៃ')})\s*(?P<amount>{_NUMBER})?")
+_DOWN_WORDS = {_canonical("ចុះថ្លៃ"), _canonical("ចុះតម្លៃ")}
+_UNCHANGED = re.compile(_words("នៅដដែល", "មិនប្រែប្រួល", "ថេរ"))
+_DATE = re.compile(
+    rf"(?:{_words('ថ្ងៃទី')})\s*(?P<day>[0-9]{{1,2}})\s*(?:{_words('ខែ')})\s*(?P<month>[^\s0-9]+?)\s*"
+    rf"(?:{_words('ឆ្នាំ')})\s*(?P<year>[0-9]{{4}})"
+)
+_HEADER = _canonical("ប្រេងឥន្ធន")  # also matches the ឥន្ធនះ spelling
 
 
 def fuel_post_counts(texts) -> dict[str, int]:
     """Structure-only counts for logging why no announcement was found (never any post text)."""
-    counts = {"posts": 0, "with_text": 0, "fuel_word": 0, "regular_word": 0, "diesel_word": 0, "price_lines": 0}
+    counts = {
+        "posts": 0, "with_text": 0, "fuel_word": 0, "regular_word": 0, "diesel_word": 0,
+        "riel_word": 0, "equals": 0, "numbers": 0, "price_lines": 0,
+    }
     for text in texts:
         counts["posts"] += 1
         if not isinstance(text, str) or not text.strip():
@@ -53,8 +78,12 @@ def fuel_post_counts(texts) -> dict[str, int]:
         normalized = _normalize(text)
         counts["with_text"] += 1
         counts["fuel_word"] += _HEADER in normalized
-        counts["regular_word"] += "សាំង" in normalized
-        counts["diesel_word"] += any(word in normalized for word in _DIESEL_WORDS)
+        counts["regular_word"] += any(_canonical(word) in normalized for word in _REGULAR_WORDS)
+        counts["diesel_word"] += any(_canonical(word) in normalized for word in _DIESEL_WORDS)
+        if _HEADER in normalized:
+            counts["riel_word"] += len(re.findall(_RIEL, normalized))
+            counts["equals"] += normalized.count("=")
+            counts["numbers"] += len(re.findall(r"[0-9]{3,}|[0-9] [0-9]{3}", normalized))
         counts["price_lines"] += len(_PRICE_LINE.findall(normalized))
     return counts
 
@@ -97,7 +126,7 @@ def _number(text: str) -> int:
 
 
 def _normalize(text: str) -> str:
-    return text.translate(_INVISIBLE).translate(_KHMER_DIGITS)
+    return _canonical(text.translate(_INVISIBLE).translate(_KHMER_DIGITS))
 
 
 def parse_fuel_post(text: object, message_id: int = 0, posted_at: str = "") -> Optional[FuelPrices]:
@@ -107,7 +136,7 @@ def parse_fuel_post(text: object, message_id: int = 0, posted_at: str = "") -> O
     normalized = _normalize(text)
     found: dict[str, tuple[int, Optional[int]]] = {}
     for match in _PRICE_LINE.finditer(normalized):
-        fuel = REGULAR if match.group("fuel") == "សាំង" else DIESEL  # any diesel spelling
+        fuel = REGULAR if match.group("fuel") in _REGULAR_CANONICAL else DIESEL
         if fuel in found:
             continue
         price = _number(match.group("price"))
@@ -131,14 +160,14 @@ def _parse_change(rest: str) -> Optional[int]:
     match = _CHANGE.search(rest)
     if match:
         amount = _number(match.group("amount")) if match.group("amount") else 0
-        return -amount if match.group("direction") == "ចុះថ្លៃ" else amount
+        return -amount if match.group("direction") in _DOWN_WORDS else amount
     if _UNCHANGED.search(rest):
         return 0
     return None
 
 
 def _parse_date(match: re.Match) -> Optional[date]:
-    month = KHMER_MONTHS.get(match.group("month"))
+    month = _MONTHS_CANONICAL.get(match.group("month"))
     if month is None:
         return None
     try:
@@ -198,3 +227,27 @@ def fuel_period_text(prices: FuelPrices) -> str:
         except ValueError:
             return ""
     return ""
+
+
+_KHMER_MONTH_NAMES = {number: name for name, number in KHMER_MONTHS.items()}
+
+
+def fuel_period_khmer(prices: FuelPrices) -> str:
+    """Owner-approved wording with Western digits, e.g. "អនុវត្តចាប់ពីថ្ងៃទី 11 ដល់ 21 ខែវិច្ឆិកា ឆ្នាំ2026"."""
+    try:
+        start = date.fromisoformat(prices.valid_from) if prices.valid_from else None
+        end = date.fromisoformat(prices.valid_to) if prices.valid_to else None
+    except ValueError:
+        return ""
+    if start is None:
+        return ""
+    month = _KHMER_MONTH_NAMES[start.month]
+    if end is None:
+        return f"អនុវត្តចាប់ពីថ្ងៃទី {start.day} ខែ{month} ឆ្នាំ{start.year}"
+    end_month = _KHMER_MONTH_NAMES[end.month]
+    if (start.year, start.month) == (end.year, end.month):
+        return f"អនុវត្តចាប់ពីថ្ងៃទី {start.day} ដល់ {end.day} ខែ{month} ឆ្នាំ{end.year}"
+    if start.year == end.year:
+        return f"អនុវត្តចាប់ពីថ្ងៃទី {start.day} ខែ{month} ដល់ថ្ងៃទី {end.day} ខែ{end_month} ឆ្នាំ{end.year}"
+    return (f"អនុវត្តចាប់ពីថ្ងៃទី {start.day} ខែ{month} ឆ្នាំ{start.year} "
+            f"ដល់ថ្ងៃទី {end.day} ខែ{end_month} ឆ្នាំ{end.year}")
