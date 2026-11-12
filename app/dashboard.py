@@ -55,14 +55,19 @@ RATE_PULSE_COLORS = {
     "buy": ("#FB7185", "#FFB7C0"),
     "sell": ("#5DA9FF", "#B8E7FF"),
     "gold": ("#F6C85F", "#FFF0B8"),
+    "cny": ("#FF8A8A", "#FFD1D1"),
 }
 RATE_ROW_COLORS = {
     "NBC": "#182438",
     "ACLEDA": "#193138",
     "WING": "#28243A",
-    "GOLD": "#2E2716",
+    "CNY": "#3A1E22",
 }
-RATE_TABLE_SOURCES = ("ACLEDA", "WING", "GOLD")
+RATE_TABLE_SOURCES = ("ACLEDA", "WING", "CNY")
+RATE_CARD_TITLE = "អត្រាប្តូរប្រាក់ រៀល ដុល្លារ និងយ័ន (ចិន)"
+# Narrow cards: two centred lines rather than an unreadably small single line.
+RATE_CARD_TITLE_TWO_LINES = "អត្រាប្តូរប្រាក់\nរៀល ដុល្លារ និងយ័ន (ចិន)"
+RATE_CARD_TITLE_MIN_ONE_LINE = 8
 NBC_CARD_HEIGHTS = {False: 132, True: 112}
 NBC_CARD_FILL = "#0E1626"
 NBC_BORDER_GRADIENT = ("#22D3EE", "#8B5CF6")
@@ -107,7 +112,7 @@ ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 NBC_LOGO_PATH = ASSETS_DIR / "nbc_logo.png"
 NBC_LOGO_HEIGHTS = {False: 40, True: 30}
 BANK_LOGO_HEIGHTS = {False: 60, True: 44}
-BANK_LOGO_FILES = {"ACLEDA": "acleda_logo_{}.png", "WING": "wing_logo_{}.png"}
+BANK_LOGO_FILES = {"ACLEDA": "acleda_logo_{}.png", "WING": "wing_logo_{}.png", "CNY": "cny_logo_{}.png"}
 # Currency coin icons (green KHR ៛, gold USD $) shown before the payment amount.
 NOTE_HEIGHTS = (64, 60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 22)
 NOTE_TO_DIGIT_RATIO = 1.1
@@ -867,12 +872,12 @@ class Dashboard:
         self.history_scrollbar.grid_remove()
 
     def _build_exchange_rate_card(self, parent) -> None:
-        """Rates & gold: a BANK | ទិញ $ | លក់ $ table for ACLEDA and WING plus the gold price."""
+        """BANK | ទិញ $ | លក់ $ table: ACLEDA and WING, then the official USD/CNY central rate."""
         card = self._card(parent, row=0, column=0, sticky="nsew")
         self.rate_card = card
         self.rate_title_label = self._label(
             card,
-            "អត្រាប្តូរប្រាក់ និង មាស",
+            RATE_CARD_TITLE,
             size=11,
             color="text",
             weight="bold",
@@ -881,11 +886,7 @@ class Dashboard:
             justify="center",
         )
         self.rate_title_label.pack(fill="x", padx=8, pady=(10, 4))
-        self.rate_title_label.bind(
-            "<Configure>",
-            lambda _event: self._fit_centered_title(self.rate_title_label, 11, 6),
-            add="+",
-        )
+        self.rate_title_label.bind("<Configure>", lambda _event: self._fit_rate_title(), add="+")
         self.rate_age_label = self._label(card, size=8, color="muted", anchor="center")
         self.rate_age_label.pack(fill="x", side="bottom", padx=8, pady=(2, 8))
         table = tk.Frame(card, bg=COLORS["surface"])
@@ -953,49 +954,46 @@ class Dashboard:
                 "buy_cell": cells["buy"],
                 "sell_cell": cells["sell"],
             }
-        self._build_gold_row(table, row=len(source_details) + 1)
+        self._build_cny_row(table, row=len(source_details) + 1)
         self._refresh_exchange_rate_display()
         self._rate_pulse_after_id = self.root.after(0, self._tick_rate_pulse)
 
-    def _build_gold_row(self, table, row: int) -> None:
-        """Full-width gold row: title line, then USD/oz, USD/ដំឡឹង and USD/ជី at the same size."""
-        # Weight 0: the gold row keeps its compact height and spare height goes to the bank rows.
-        table.grid_rowconfigure(row, weight=0)
-        tint = RATE_ROW_COLORS["GOLD"]
-        cell = tk.Frame(table, bg=tint, padx=6, highlightthickness=2, highlightbackground=tint, highlightcolor=tint)
-        cell.grid(row=row, column=0, columnspan=3, sticky="nsew", pady=2)
-        title_line = tk.Frame(cell, bg=tint)
-        title_line.pack(fill="x", pady=(1, 0))
-        bank_label = self._label(title_line, "GOLD", size=10, color="usd", weight="bold", anchor="w")
-        bank_label.pack(side="left")
-        category_label = self._label(title_line, "XAU/USD · oz", size=7, color="muted", anchor="w")
-        category_label.pack(side="left", padx=(6, 0))
+    def _build_cny_row(self, table, row: int) -> None:
+        """Third row: USD/CNY official central rate (one midpoint) across the ទិញ and លក់ columns."""
+        table.grid_rowconfigure(row, weight=1)
+        tint = RATE_ROW_COLORS["CNY"]
+        bank_cell = tk.Frame(table, bg=tint, padx=6, highlightthickness=0)
+        bank_cell.grid(row=row, column=0, sticky="nsew", pady=2)
+        bank_label = self._label(bank_cell, "USD/CNY", size=10, color="text", weight="bold", anchor="center")
+        bank_label.pack(anchor="center", pady=(4, 0))
+        logo = self._bank_logos.get("CNY", {}).get(False)
+        if logo is not None:
+            category_label = tk.Label(bank_cell, image=logo, bg=tint, bd=0, padx=0, pady=0)
+            category_label.pack(anchor="center", expand=True, pady=(2, 4))
+        else:
+            category_label = self._label(bank_cell, "PBOC", size=7, color="muted", anchor="center")
+            category_label.pack(anchor="center")
+        cell = tk.Frame(table, bg=tint, highlightthickness=2, highlightbackground=tint, highlightcolor=tint)
+        cell.grid(row=row, column=1, columnspan=2, sticky="nsew", pady=2)
         inner = tk.Frame(cell, bg=tint)
-        inner.pack(expand=True)
-        figure_row = tk.Frame(inner, bg=tint)
-        figure_row.pack()
-        figure = self._label(figure_row, "—", size=14, color="usd", weight="bold", family=self.figure_font, pady=0)
+        inner.place(relx=0.5, rely=0.5, anchor="center")
+        figure_line = tk.Frame(inner, bg=tint)
+        figure_line.pack()
+        figure = self._label(figure_line, "—", size=14, color="text", weight="bold", family=self.figure_font)
         figure.pack(side="left")
-        arrow = self._label(figure_row, "", size=10, color="muted", weight="bold", pady=0)
-        arrow.pack(side="left", padx=(3, 0))
-        local_units = {}
-        for unit in ("damlung", "chi"):
-            line = tk.Frame(inner, bg=tint)
-            line.pack()
-            value = self._label(line, "", size=14, color="usd", weight="bold", family=self.figure_font, pady=0)
-            value.pack(side="left")
-            name = self._label(line, "", size=14, color="usd", weight="bold", family=self.rate_group_font, pady=0)
-            name.pack(side="left", padx=(4, 0))
-            flag = tk.Label(line, bg=tint, bd=0, padx=0, pady=0)
-            flag.pack(side="left", padx=(6, 0))
-            unit_arrow = self._label(line, "", size=10, color="muted", weight="bold", pady=0)
-            unit_arrow.pack(side="left", padx=(4, 0))
-            local_units[unit] = {"line": line, "value": value, "name": name, "flag": flag, "arrow": unit_arrow}
-        self.rate_display_labels["GOLD"] = {
-            "row": cell,
+        unit = self._label(figure_line, "", size=10, color="muted", weight="bold", family=self.figure_font)
+        unit.pack(side="left", padx=(3, 0), anchor="s", pady=(0, 3))
+        arrow = self._label(figure_line, "", size=10, color="muted", weight="bold")
+        arrow.pack(side="left", padx=(4, 0))
+        caption = self._label(inner, "", size=7, color="muted", anchor="center")
+        caption.pack()
+        self.rate_display_labels["CNY"] = {
+            "row": bank_cell,
             "bank": bank_label,
             "category": category_label,
             "official": figure,
+            "unit": unit,
+            "caption": caption,
             "buy": None,
             "sell": None,
             "official_arrow": arrow,
@@ -1004,7 +1002,6 @@ class Dashboard:
             "official_cell": cell,
             "buy_cell": None,
             "sell_cell": None,
-            "local_units": local_units,
         }
 
     def _build_nbc_header_card(self, header) -> None:
@@ -1272,6 +1269,31 @@ class Dashboard:
         self._arrange_rate_group_controls(narrow=False)
         self._render_rate_group_messages()
 
+    def _fit_rate_title(self) -> None:
+        """One line when it fits at 8 pt or more; otherwise two centred lines (sized by the longer)."""
+        label = self.rate_title_label
+        width = label.winfo_width()
+        if width <= 1:
+            return
+        font = self._responsive_title_fonts.get(label)
+        if font is None:
+            font = tkfont.Font(root=self.root, family=self.khmer_title_font, size=11, weight="bold")
+            self._responsive_title_fonts[label] = font
+        available = max(1, width - 12)
+        for text, minimum in ((RATE_CARD_TITLE, RATE_CARD_TITLE_MIN_ONE_LINE), (RATE_CARD_TITLE_TWO_LINES, 6)):
+            for size in range(11, minimum - 1, -1):
+                font.configure(size=size)
+                if max(font.measure(line) for line in text.split("\n")) <= available:
+                    break
+            else:
+                continue
+            break
+        if label.cget("text") != text:
+            label.configure(text=text)
+        if self._responsive_title_sizes.get(label) != size or label.cget("font") != str(font):
+            self._responsive_title_sizes[label] = size
+            label.configure(font=font)
+
     def _fit_centered_title(
         self,
         label: tk.Label,
@@ -1330,21 +1352,16 @@ class Dashboard:
             rate = self.exchange_rates.get(source)
             stale = rate is None or rate.is_stale(now)
             tint = RATE_ROW_COLORS[source]
-            if source == "GOLD":
+            if source == "CNY":
                 price = rate.official_rate if rate is not None else None
-                values = {"official": format_gold_price(price) if price is not None else "—"}
-                units = dict(zip(("damlung", "chi"), gold_local_units(price))) if price is not None else {}
-                for unit, parts in labels["local_units"].items():
-                    value_text = f"≈ ${units[unit]:,.2f}" if unit in units else ""
-                    name_text = f"/ {GOLD_UNIT_NAMES[unit]}" if unit in units else ""
-                    if parts["value"].cget("text") != value_text:
-                        parts["value"].configure(text=value_text)
-                        parts["name"].configure(text=name_text)
-                        parts["flag"].configure(image=self._cambodia_flag if unit in units else "")
+                values = {"official": f"{price:.4f}" if price is not None else "—"}
+                unit_text = "¥" if price is not None else ""
+                if labels["unit"].cget("text") != unit_text:
+                    labels["unit"].configure(text=unit_text)
                 effective = compact_effective_at(rate.effective_at) if rate is not None and rate.effective_at else ""
-                category = "XAU/USD · oz" + (f" · {effective}" if effective else "")
-                if labels["category"].cget("text") != category:
-                    labels["category"].configure(text=category)
+                caption = "PBOC central rate" + (f" · {effective}" if effective else "")
+                if labels["caption"].cget("text") != caption:
+                    labels["caption"].configure(text=caption)
             else:
                 _quote, buy, sell, _effective = format_rate_display_values(source, rate, now)
                 values = {"buy": buy or "—", "sell": sell or "—"}
@@ -1356,10 +1373,7 @@ class Dashboard:
                 # 2. One arrow at a time: the direction of the figure's last change, or none yet.
                 trend = rate.trend(field) if rate is not None and not stale and has_value else None
                 self._set_trend_label(labels[f"{field}_arrow"], trend)
-                if source == "GOLD":
-                    for parts in labels["local_units"].values():
-                        self._set_trend_label(parts["arrow"], trend if parts["value"].cget("text") else None)
-            labels["bank"].configure(fg=COLORS["muted"] if stale else COLORS["usd" if source == "GOLD" else "text"])
+            labels["bank"].configure(fg=COLORS["muted"] if stale else COLORS["text"])
             labels["stale"] = stale
         self._refresh_nbc_header(now)
 
@@ -1410,8 +1424,8 @@ class Dashboard:
         progress = rate_pulse_progress(self._rate_pulse_step)
         self._rate_pulse_step += 1
         for source, labels in self.rate_display_labels.items():
-            if source == "GOLD":
-                figure_colors = ((labels["official"], RATE_PULSE_COLORS["gold"]),)
+            if source == "CNY":
+                figure_colors = ((labels["official"], RATE_PULSE_COLORS["cny"]),)
             else:
                 figure_colors = (
                     (labels["buy"], RATE_PULSE_COLORS["buy"]),
@@ -1668,7 +1682,8 @@ class Dashboard:
     def _apply_history_columns(self, narrow: bool) -> None:
         self._configure_history_columns(self.history_headings, narrow)
         if self.history_canvas.winfo_width() > 1:
-            self._fix_history_columns(self.history_headings, self._history_column_widths(narrow), spare=True)
+            amounts = [format_payment_amount(row.get("amount"), row.get("currency")) for row in self._history_rows]
+            self._fix_history_columns(self.history_headings, self._history_column_widths(narrow, amounts), spare=True)
         for column, label in enumerate(self.history_heading_labels):
             if column in (2, 3):
                 font = self._font(9, "bold", self.condensed_font) if narrow else self._font(11, "bold")
@@ -1687,9 +1702,21 @@ class Dashboard:
         self._history_rerender_id = None
         self._render_history(self._history_rows)
 
-    def _history_column_widths(self, narrow: bool) -> list[int]:
+    def _history_fonts(self, narrow: bool) -> tuple[tuple, tuple]:
+        """(main font for AMOUNT/SENDER, condensed font for BANK/TIME) used by the history rows."""
+        main_size = 13 if narrow else 14
+        condensed = (self.condensed_font, 11) if narrow else (None, 14)
+        return self._font(main_size, "bold"), self._font(condensed[1], "normal", condensed[0])
+
+    def _history_column_widths(self, narrow: bool, amounts: Iterable[str] = ()) -> list[int]:
+        """AMOUNT and TIME get what their text needs; SENDER and BANK share the rest 11:9."""
         width = self.history_canvas.winfo_width()
-        amount, time_width = (118, 64) if narrow else (165, 110)
+        padding = 2 * (6 if narrow else 10) + 6
+        main_font, condensed_font = (tkfont.Font(root=self.root, font=font) for font in self._history_fonts(narrow))
+        amount_text = max((main_font.measure(text) for text in amounts), default=0)
+        amount = max(amount_text, main_font.measure("៛ 100,000"), tkfont.Font(
+            root=self.root, font=self._font(10 if narrow else 11, "bold")).measure("AMOUNT")) + padding
+        time_width = condensed_font.measure("12:00 PM") + padding
         rest = max(0, width - amount - time_width)
         return [amount, rest * 11 // 20, rest - rest * 11 // 20, time_width]
 
@@ -1733,7 +1760,8 @@ class Dashboard:
             child.destroy()
         self._history_row_count = len(rows)
         self._history_render_width = self.history_canvas.winfo_width()
-        column_widths = self._history_column_widths(narrow) if self._history_render_width > 1 else [0, 0, 0, 0]
+        amounts = [format_payment_amount(row.get("amount"), row.get("currency")) for row in rows]
+        column_widths = self._history_column_widths(narrow, amounts) if self._history_render_width > 1 else [0, 0, 0, 0]
         padx = 6 if narrow else 10
         content_height = 0
         self._fix_history_columns(self.history_headings, column_widths, spare=True)
@@ -1752,13 +1780,12 @@ class Dashboard:
             try: shown_time = datetime.fromisoformat(timestamp).astimezone().strftime("%I:%M %p")
             except (ValueError, TypeError): shown_time = "—"
             row_foreground = COLORS[amount_color(row.get("currency"))]
-            main_size = 13 if narrow else 14
-            condensed = (self.condensed_font, 11) if narrow else (None, 14)
+            main_font, condensed_font = self._history_fonts(narrow)
             values = (
-                (format_payment_amount(row.get("amount"), row.get("currency")), self._font(main_size, "bold")),
-                (str(row.get("sender_name") or "—"), self._font(main_size, "bold")),
-                (str(row.get("bank") or "OTHER BANK"), self._font(condensed[1], "normal", condensed[0])),
-                (shown_time, self._font(condensed[1], "normal", condensed[0])),
+                (format_payment_amount(row.get("amount"), row.get("currency")), main_font),
+                (str(row.get("sender_name") or "—"), main_font),
+                (str(row.get("bank") or "OTHER BANK"), condensed_font),
+                (shown_time, condensed_font),
             )
             lines = 1
             fitted = []
@@ -1939,7 +1966,7 @@ class Dashboard:
         base_size, arrow_size = (12, 6) if narrow else (18, 10)
         cells = [
             (labels[field], labels[f"{field}_cell"])
-            for source, labels in self.rate_display_labels.items() if source != "GOLD"
+            for source, labels in self.rate_display_labels.items() if source != "CNY"
             for field in ("buy", "sell")
         ]
         widths = [cell.winfo_width() for _figure, cell in cells if cell.winfo_width() > 1]
@@ -1958,6 +1985,26 @@ class Dashboard:
             self._rate_figure_size = size
             for figure, _cell in cells:
                 figure.configure(font=self._font(size, "bold", self.figure_font))
+            cny = self.rate_display_labels.get("CNY")
+            if cny is not None:  # same figure size as the bank rows above
+                cny["official"].configure(font=self._font(size, "bold", self.figure_font))
+        self._fit_cny_label()
+
+    def _fit_cny_label(self) -> None:
+        """"USD/CNY" is longer than the bank names: shrink it (never the cell) to fit its column."""
+        cny = self.rate_display_labels.get("CNY")
+        if cny is None or cny["row"].winfo_width() <= 1:
+            return
+        narrow = bool(self._rate_group_narrow)
+        available = cny["row"].winfo_width() - 2 * int(cny["row"].cget("padx")) - 2
+        size = 8 if narrow else 12
+        while size > 6 and tkfont.Font(root=self.root, family="Segoe UI", size=size, weight="bold").measure(
+            cny["bank"].cget("text")
+        ) + 2 * int(cny["bank"].cget("padx")) > available:
+            size -= 1
+        if getattr(self, "_cny_label_size", None) != size:
+            self._cny_label_size = size
+            cny["bank"].configure(font=self._font(size, "bold"))
 
     def _fit_history_height(self) -> None:
         """Let the recent-payments list use the space left under the payment card."""
@@ -1976,6 +2023,7 @@ class Dashboard:
         """Compact bank-table and summary typography for windows narrower than 1080 px."""
         figure_size, arrow_size, bank_size = (12, 6, 8) if narrow else (18, 10, 12)
         self._rate_figure_size = None
+        self._cny_label_size = None
         for source, labels in self.rate_display_labels.items():
             labels["row"].configure(padx=2 if narrow else 6)
             labels["bank"].configure(font=self._font(bank_size, "bold"))
@@ -1992,10 +2040,10 @@ class Dashboard:
                 parts["value"].configure(font=self._font(figure_size, "bold", self.figure_font))
                 parts["name"].configure(font=self._font(GOLD_UNIT_NAME_SIZES[narrow], "bold", self.rate_group_font))
                 parts["arrow"].configure(font=self._font(arrow_size, "bold"), padx=0)
-        self._cambodia_flag = cambodia_flag_image(self.root, CAMBODIA_FLAG_HEIGHTS[narrow])
-        for parts in self.rate_display_labels["GOLD"]["local_units"].values():
-            if parts["value"].cget("text"):
-                parts["flag"].configure(image=self._cambodia_flag)
+        cny = self.rate_display_labels.get("CNY")
+        if cny is not None:
+            cny["unit"].configure(font=self._font(arrow_size, "bold", self.figure_font))
+            cny["caption"].configure(font=self._font(6 if narrow else 7))
         for column, header in self.rate_table_headers.items():
             family = None if column == 0 else self.khmer_title_font
             header.configure(font=self._font(8 if narrow else 9, "bold", family))

@@ -24,6 +24,7 @@ logs/*.log*
 *.jfif
 *.docx
 /nbc_logo.png
+/pboc_logo.png
 
 # Review material and agent reports (kept in Dropbox, not in Git)
 reports/

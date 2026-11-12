@@ -186,6 +186,10 @@ Every day, exactly on the hour from 08:00 to 22:00, the male voice says `នៅ�
 
 The payment listener pings Telegram every 30 seconds. If payment monitoring stays down for 2 minutes (including no connection at startup), the male voice says `សូមជូនដំណឹង ប្រព័ន្ធទទួលប្រាក់ត្រូវបានផ្តាច់ សូមពិនិត្យអ៊ីនធឺណិត`, or `សូមចូល Telegram ឡើងវិញ` when Telegram has revoked or expired the login, and repeats every 10 minutes until it recovers, when `ប្រព័ន្ធទទួលប្រាក់បានភ្ជាប់ឡើងវិញ` is said once. Alerts play from pre-recorded files in `assets/` (no internet needed), are heard even when the speaker is muted, run at any time of day, and are active only in production mode.
 
+### USD/CNY official rate (rates card, third row)
+
+The rates card is titled `អត្រាប្តូរប្រាក់ រៀល ដុល្លារ និងយ័ន (ចិន)` (two centred lines when the card is narrow). Its third row, below the unchanged ACLEDA and WING rows, shows the official USD/CNY central parity (人民币汇率中间价) published by CFETS under People's Bank of China authority each China working day at 9:15 Beijing time (08:15 Cambodia): one figure centred across the ទិញ and លក់ columns with a small `¥`, the owner-supplied logo (`assets/cny_logo_60.png` / `cny_logo_44.png`), ▲ green / ▼ gold after a change, and the caption `PBOC central rate · <date>`. It is read every 15 minutes with the other rates from `https://www.chinamoney.com.cn/r/cms/www/chinamoney/data/fx/ccpr.json`. That server omits its intermediate certificate, so the public intermediate `assets/certs/sheca_ov_tls_rsa_ca_a1.pem` (issued by UCA Global G2 Root, which Windows trusts) is supplied for those requests only; certificate and hostname verification stay on. The PBOC website is not used because its certificate chain ends at a root Windows does not trust. Gold no longer has a row in the card; it appears in the ticker.
+
 ### Gold price
 
 The GOLD row uses GoldAPI.io's free plan (150 requests per month), which permits displaying the data to the app's users. To enable it:

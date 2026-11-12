@@ -1,6 +1,9 @@
+import json
 from datetime import datetime
 from decimal import Decimal
 from urllib.error import URLError
+
+import pytest
 
 import app.exchange_rates as exchange_rates
 from app.database import PaymentStore
@@ -246,3 +249,64 @@ def test_rate_trend_compares_current_with_previous():
     assert exchange_rates.rate_trend(Decimal("4081"), Decimal("4081")) is None
     assert exchange_rates.rate_trend(None, Decimal("4081")) is None
     assert exchange_rates.rate_trend(Decimal("4081"), None) is None
+
+
+# --- Official USD/CNY central parity (CFETS / PBOC), third row of the rates card -----------------
+
+CFETS_SAMPLE = json.dumps({
+    "data": {"lastDate": "2026-11-12 9:15", "lastDateEn": "12/11/2026 9:15"},
+    "records": [
+        {"vrtCode": "2", "price": "7.4342", "vrtEName": "EUR/CNY"},
+        {"vrtCode": "1", "price": "6.7174", "bp": "17.00", "vrtEName": "USD/CNY"},
+    ],
+})
+
+
+def test_cfets_central_parity_json_gives_usd_cny_and_date():
+    from app.exchange_rates import parse_cny_parity_json
+
+    rate = parse_cny_parity_json(CFETS_SAMPLE)
+    assert (rate.source, rate.category) == ("CNY", "PBOC central parity")
+    assert rate.official_rate == Decimal("6.7174")
+    assert (rate.buy_rate, rate.sell_rate) == (None, None)
+    assert rate.effective_at == "12 November 2026"
+
+
+def test_cfets_parity_rejects_missing_or_implausible_values():
+    from app.exchange_rates import parse_cny_parity_json
+
+    for payload in (
+        "not json",
+        json.dumps({"data": {"lastDate": "2026-11-12 9:15"}, "records": [{"vrtEName": "EUR/CNY", "price": "7.4"}]}),
+        json.dumps({"data": {"lastDate": "2026-11-12 9:15"}, "records": [{"vrtEName": "USD/CNY", "price": "67.174"}]}),
+    ):
+        with pytest.raises(ValueError):
+            parse_cny_parity_json(payload)
+
+
+def test_cfets_requests_verify_certificates_with_the_shipped_intermediate():
+    import ssl
+
+    from app import exchange_rates
+
+    assert exchange_rates.CFETS_INTERMEDIATE_CERT.is_file()
+    context = exchange_rates._cfets_context()
+    assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
+
+
+def test_monitor_saves_the_cny_parity_with_the_bank_rates(tmp_path, monkeypatch):
+    from app import exchange_rates
+    from app.exchange_rates import ExchangeRateMonitor, parse_cny_parity_json
+
+    store = PaymentStore(tmp_path / "state.sqlite3")
+    try:
+        monkeypatch.setattr(exchange_rates, "fetch_rate", lambda source: (_ for _ in ()).throw(URLError("offline")))
+        monkeypatch.setattr(exchange_rates, "fetch_cny_parity", lambda: parse_cny_parity_json(CFETS_SAMPLE))
+        rates = ExchangeRateMonitor(store, lambda rates: None).refresh_once()
+        assert rates["CNY"].official_rate == Decimal("6.7174")
+        monkeypatch.setattr(exchange_rates, "fetch_cny_parity", lambda: parse_cny_parity_json(
+            CFETS_SAMPLE.replace("6.7174", "6.7101")))
+        rates = ExchangeRateMonitor(store, lambda rates: None).refresh_once()
+        assert rates["CNY"].trend("official") == "down"  # previous value kept for the arrow
+    finally:
+        store.close()

@@ -87,7 +87,7 @@ def _group_message(message_id, sender, minutes_ago, text, now=None):
     }
 
 
-def _rates(fetched_at=None, nbc_previous=None, acleda_previous_buy=None, gold_previous=None):
+def _rates(fetched_at=None, nbc_previous=None, acleda_previous_buy=None, gold_previous=None, cny_previous=None):
     fetched_at = fetched_at or datetime.now(CAMBODIA_TIMEZONE)
     return {
         "NBC": ExchangeRate(
@@ -105,6 +105,10 @@ def _rates(fetched_at=None, nbc_previous=None, acleda_previous_buy=None, gold_pr
         "GOLD": ExchangeRate(
             "GOLD", "XAU/USD spot", Decimal("2418.60"), None, None,
             "07 Nov 2026 14:05", fetched_at, previous_official_rate=gold_previous,
+        ),
+        "CNY": ExchangeRate(
+            "CNY", "PBOC central parity", Decimal("6.7174"), None, None,
+            "12 November 2026", fetched_at, previous_official_rate=cny_previous,
         ),
     }
 
@@ -223,41 +227,37 @@ def _layout(dashboard, geometry):
     dashboard.root.update_idletasks()
 
 
-def test_rates_and_gold_table_and_nbc_glass_card_show_figures_arrows_and_best_rates():
+def test_rates_table_with_official_cny_row_and_nbc_glass_card_show_figures_and_arrows():
     now = datetime.now(CAMBODIA_TIMEZONE)
     history = [Decimal(value) for value in ("4079", "4081", "4080", "4083", "4085")]
     dashboard = _make_dashboard(
         initial_exchange_rates=_rates(
             now, nbc_previous=Decimal("4083"), acleda_previous_buy=Decimal("4083"), gold_previous=Decimal("2405.10"),
+            cny_previous=Decimal("6.7157"),
         ),
         nbc_history=lambda days=7: history,
     )
     try:
         _layout(dashboard, "1382x744")
-        assert dashboard.rate_title_label.cget("text") == "អត្រាប្តូរប្រាក់ និង មាស"
+        assert dashboard.rate_title_label.cget("text").replace("\n", " ") == "អត្រាប្តូរប្រាក់ រៀល ដុល្លារ និងយ័ន (ចិន)"
         assert [dashboard.rate_table_headers[column].cget("text") for column in range(3)] == ["BANK", "ទិញ $", "លក់ $"]
-        assert list(dashboard.rate_display_labels) == ["ACLEDA", "WING", "GOLD"]
+        assert list(dashboard.rate_display_labels) == ["ACLEDA", "WING", "CNY"]
         labels = dashboard.rate_display_labels
         assert (labels["ACLEDA"]["buy"].cget("text"), labels["ACLEDA"]["sell"].cget("text")) == ("4,081", "4,095")
         assert (labels["WING"]["buy"].cget("text"), labels["WING"]["sell"].cget("text")) == ("4,083", "4,093")
-        assert labels["GOLD"]["official"].cget("text") == "$2,418.60"
-        assert int(labels["GOLD"]["official_cell"].grid_info()["columnspan"]) == 3
-        assert labels["GOLD"]["official_arrow"].cget("text") == "▲"
-        assert labels["GOLD"]["official_arrow"].cget("fg") == RATE_TREND_COLORS["up"]
-        local = labels["GOLD"]["local_units"]
-        assert local["damlung"]["value"].cget("text") == "≈ $2,915.99"
-        assert local["damlung"]["name"].cget("text") == "/ " + GOLD_UNIT_NAMES["damlung"]
-        assert local["chi"]["value"].cget("text") == "≈ $291.60"
-        assert local["chi"]["name"].cget("text") == "/ " + GOLD_UNIT_NAMES["chi"]
-        ounce_font = tkfont.Font(root=dashboard.root, font=labels["GOLD"]["official"].cget("font"))
-        for unit in ("damlung", "chi"):
-            unit_font = tkfont.Font(root=dashboard.root, font=local[unit]["value"].cget("font"))
-            assert (unit_font.cget("size"), unit_font.cget("family")) == (ounce_font.cget("size"), ounce_font.cget("family"))
-            assert unit_font.cget("size") == 18
-            assert local[unit]["flag"].cget("image") == str(dashboard._cambodia_flag)
-            assert int(dashboard._cambodia_flag.height()) == 18
-            assert local[unit]["flag"].winfo_reqheight() <= local[unit]["value"].winfo_reqheight()
-        assert labels["GOLD"]["category"].cget("text") == "XAU/USD · oz · 7 Nov 14:05"
+        cny = labels["CNY"]
+        assert cny["bank"].cget("text") == "USD/CNY"
+        assert (cny["official"].cget("text"), cny["unit"].cget("text")) == ("6.7174", "¥")
+        assert int(cny["official_cell"].grid_info()["columnspan"]) == 2  # one midpoint across ទិញ and លក់
+        assert cny["caption"].cget("text") == "PBOC central rate · 12 Nov"
+        assert cny["official_arrow"].cget("text") == "▲"
+        assert cny["official_arrow"].cget("fg") == RATE_TREND_COLORS["up"]
+        assert str(cny["category"].cget("image"))  # the supplied logo, like the bank rows
+        cny_font = tkfont.Font(root=dashboard.root, font=cny["official"].cget("font"))
+        bank_font = tkfont.Font(root=dashboard.root, font=labels["ACLEDA"]["buy"].cget("font"))
+        assert (cny_font.cget("size"), cny_font.cget("family")) == (bank_font.cget("size"), bank_font.cget("family"))
+        unit_font = tkfont.Font(root=dashboard.root, font=cny["unit"].cget("font"))
+        assert unit_font.cget("size") < cny_font.cget("size")  # small yuan sign
         assert labels["ACLEDA"]["buy_arrow"].cget("text") == "▼"
         assert labels["ACLEDA"]["buy_arrow"].cget("fg") == RATE_TREND_COLORS["down"]
         # Unchanged figures show no arrow (never both ▲ and ▼); no cell is outlined.
@@ -267,9 +267,6 @@ def test_rates_and_gold_table_and_nbc_glass_card_show_figures_arrows_and_best_ra
                 assert labels[source][f"{field}_cell"].cget("highlightbackground") == RATE_ROW_COLORS[source]
             assert labels[source]["bank"].cget("anchor") == "center"
             assert labels[source]["bank"].pack_info()["anchor"] == "center"
-        for unit in ("damlung", "chi"):
-            assert labels["GOLD"]["local_units"][unit]["arrow"].cget("text") == "▲"
-            assert labels["GOLD"]["local_units"][unit]["arrow"].cget("fg") == RATE_TREND_COLORS["up"]
         for source, source_labels in labels.items():
             assert source_labels["row"].cget("bg") == RATE_ROW_COLORS[source]
         figure_font = tkfont.Font(root=dashboard.root, font=labels["ACLEDA"]["buy"].cget("font"))
@@ -307,7 +304,7 @@ def test_rates_and_gold_table_and_nbc_glass_card_show_figures_arrows_and_best_ra
         dashboard._rate_pulse_after_id = None
         dashboard._rate_pulse_step = 12
         dashboard._apply_rate_pulse()
-        assert labels["GOLD"]["official"].cget("fg") == "#FFF0B8"
+        assert labels["CNY"]["official"].cget("fg") == "#FFD1D1"
         assert labels["ACLEDA"]["buy"].cget("fg") == "#FFB7C0"
         assert labels["WING"]["sell"].cget("fg") == "#B8E7FF"
         dashboard.exchange_rates = _rates(now)
@@ -322,10 +319,9 @@ def test_rates_and_gold_table_and_nbc_glass_card_show_figures_arrows_and_best_ra
         assert dashboard.nbc_text("pill") == ""
         dashboard.exchange_rates = {}
         dashboard._refresh_exchange_rate_display()
-        assert labels["GOLD"]["official"].cget("text") == "—"
-        assert local["damlung"]["value"].cget("text") == ""
-        assert local["damlung"]["arrow"].cget("text") == ""
-        assert local["damlung"]["flag"].cget("image") == ""
+        assert labels["CNY"]["official"].cget("text") == "—"
+        assert labels["CNY"]["unit"].cget("text") == ""
+        assert labels["CNY"]["official_arrow"].cget("text") == ""
         assert dashboard.nbc_text("figure") == "—"
         dashboard._tick_rate_pulse()
         assert dashboard._rate_pulse_after_id is not None
@@ -346,7 +342,7 @@ def test_dashboard_uses_half_and_quarter_columns_with_private_card():
         assert dashboard.rate_group_title_label.cget("text") == "អត្រាប្តូរប្រាក់ឯកជន - Private rates"
         assert dashboard.private_card.cget("bg") == COLORS["surface"]
         assert dashboard.rate_top_bar.cget("bg") == "#FFE66D"
-        assert dashboard.rate_title_label.cget("text") == "អត្រាប្តូរប្រាក់ និង មាស"
+        assert dashboard.rate_title_label.cget("text").replace("\n", " ") == "អត្រាប្តូរប្រាក់ រៀល ដុល្លារ និងយ័ន (ចិន)"
         assert dashboard.controls_card.master is dashboard.operations_body
         assert dashboard.status_card.master is dashboard.operations_body
         assert dashboard.today_card.master is dashboard.operations_body
@@ -390,7 +386,7 @@ def test_dashboard_uses_half_and_quarter_columns_with_private_card():
             assert dashboard.rate_group_scrollbar.winfo_width() <= 10
             for title in (dashboard.rate_title_label, dashboard.rate_group_title_label):
                 title_font = tkfont.Font(root=dashboard.root, font=title.cget("font"))
-                assert title_font.measure(title.cget("text")) <= title.winfo_width() - 12
+                assert max(title_font.measure(line) for line in title.cget("text").split("\n")) <= title.winfo_width() - 12
             for labels in dashboard.rate_display_labels.values():
                 for field in ("official", "buy", "sell"):
                     figure = labels.get(field)

@@ -1,9 +1,11 @@
 import json
 import logging
 import re
+import ssl
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
 from typing import Callable, Optional
@@ -50,6 +52,19 @@ GOLD_SOURCE = RateSource(
     "XAU/USD spot",
     "https://www.goldapi.io/api/price/XAU/USD",
 )
+# Official USD/CNY central parity (人民币汇率中间价), published by CFETS under PBOC authority each
+# China working day at 9:15 Beijing time.
+CNY_SOURCE = RateSource(
+    "CNY",
+    "PBOC central parity",
+    "https://www.chinamoney.com.cn/r/cms/www/chinamoney/data/fx/ccpr.json",
+)
+# chinamoney.com.cn does not send its intermediate certificate. This public intermediate (issued by
+# UCA Global G2 Root, which Windows trusts; valid to 2035) completes the chain; verification and the
+# hostname check stay fully on. Used only for CFETS requests.
+CFETS_INTERMEDIATE_CERT = Path(__file__).resolve().parent.parent / "assets" / "certs" / "sheca_ov_tls_rsa_ca_a1.pem"
+CNY_RATE_MIN = Decimal("5")
+CNY_RATE_MAX = Decimal("10")
 GOLD_REFRESH_INTERVAL = timedelta(hours=12)
 TROY_OUNCE_GRAMS = Decimal("31.1034768")
 DAMLUNG_GRAMS = Decimal("37.5")
@@ -270,6 +285,50 @@ def fetch_rate(source: RateSource, timeout: int = RATE_SOURCE_TIMEOUT_SECONDS) -
     return _PARSERS[source.key](html, datetime.now(CAMBODIA_TIMEZONE))
 
 
+def _cny_rate(value: str, day: datetime, fetched_at: Optional[datetime]) -> ExchangeRate:
+    rate = Decimal(value)
+    if not CNY_RATE_MIN <= rate <= CNY_RATE_MAX:
+        raise ValueError("USD/CNY central parity is outside the expected range")
+    return ExchangeRate(
+        CNY_SOURCE.key, CNY_SOURCE.category, rate, None, None,
+        f"{day.day} {day.strftime('%B %Y')}", fetched_at or datetime.now(CAMBODIA_TIMEZONE),
+    )
+
+
+def parse_cny_parity_json(text: str, fetched_at: Optional[datetime] = None) -> ExchangeRate:
+    """CFETS ccpr.json: data.lastDate "2026-11-12 9:15" and records[] with vrtEName "USD/CNY"."""
+    try:
+        payload = json.loads(text)
+        last_date = str(payload["data"]["lastDate"]).split()[0]
+        day = datetime.strptime(last_date, "%Y-%m-%d")
+        record = next(item for item in payload["records"] if str(item.get("vrtEName", "")).upper() == "USD/CNY")
+        return _cny_rate(str(record["price"]), day, fetched_at)
+    except (KeyError, TypeError, ValueError, StopIteration, InvalidOperation) as exc:
+        raise ValueError("USD/CNY central parity was not found in the CFETS data") from exc
+
+
+def _cfets_context() -> ssl.SSLContext:
+    context = ssl.create_default_context()
+    if CFETS_INTERMEDIATE_CERT.is_file():
+        context.load_verify_locations(cafile=str(CFETS_INTERMEDIATE_CERT))
+    return context
+
+
+def _fetch_text(url: str, timeout: int, context: Optional[ssl.SSLContext] = None) -> str:
+    request = Request(url, headers={"User-Agent": "ABA-Payment-Speaker/1.0 (rates display)"})
+    with urlopen(request, timeout=timeout, context=context) as response:
+        content = response.read(MAX_PAGE_BYTES + 1)
+        charset = response.headers.get_content_charset() or "utf-8"
+    if len(content) > MAX_PAGE_BYTES:
+        raise ValueError("USD/CNY source exceeded the size limit")
+    return content.decode(charset, errors="replace")
+
+
+def fetch_cny_parity(timeout: int = RATE_SOURCE_TIMEOUT_SECONDS) -> ExchangeRate:
+    """Official USD/CNY central parity from the CFETS data feed (certificate-verified)."""
+    return parse_cny_parity_json(_fetch_text(CNY_SOURCE.url, timeout, _cfets_context()))
+
+
 def parse_gold_response(payload: bytes, fetched_at: Optional[datetime] = None) -> ExchangeRate:
     """Parse a GoldAPI.io XAU/USD response into a USD-per-troy-ounce gold price."""
     data = json.loads(payload.decode("utf-8"))
@@ -468,9 +527,9 @@ class ExchangeRateMonitor:
         self._thread.start()
 
     def refresh_once(self) -> dict[str, ExchangeRate]:
-        for source in RATE_SOURCES:
+        for source in (*RATE_SOURCES, CNY_SOURCE):
             try:
-                rate = fetch_rate(source)
+                rate = fetch_cny_parity() if source is CNY_SOURCE else fetch_rate(source)
             except ValueError as exc:
                 if source.key == "NBC" and str(exc) == NBC_NOT_PUBLISHED_MESSAGE:
                     # Weekends/holidays: NBC shows no new rate; keep the last published one current.
