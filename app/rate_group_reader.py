@@ -12,6 +12,7 @@ from telethon.errors import SessionPasswordNeededError
 
 from .config import Settings
 from .exchange_rates import CAMBODIA_TIMEZONE
+from .fuel_prices import FUEL_CHANNEL_ID, FUEL_HISTORY_MESSAGES, parse_fuel_post
 from .rate_post_format import NON_TEXT_PLACEHOLDER, PHOTO_PLACEHOLDER
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ class RateGroupReader:
         self._stop_requested = threading.Event()
         self._task: Optional[asyncio.Task] = None
         self._task_lock = threading.Lock()
+        self._fuel_channel = None
         self._shown_ids: set[int] = set()
         self._shown_id_order: deque[int] = deque()
 
@@ -125,13 +127,58 @@ class RateGroupReader:
         return True
 
     async def _find_target_group(self):
+        """Find the private group (required) and the Ministry fuel channel (optional) in one pass."""
         client = self._client
         if client is None:
             raise RuntimeError("Telegram client is not initialized")
+        group = None
+        self._fuel_channel = None
         async for dialog in client.iter_dialogs():
             if dialog.id == TARGET_RATE_GROUP_ID:
-                return dialog.entity
-        raise TargetGroupUnavailableError("The configured private group is not available to this account")
+                group = dialog.entity
+            elif dialog.id == FUEL_CHANNEL_ID:
+                self._fuel_channel = dialog.entity
+            if group is not None and self._fuel_channel is not None:
+                break
+        if group is None:
+            raise TargetGroupUnavailableError("The configured private group is not available to this account")
+        return group
+
+    def _publish_fuel_post(self, message) -> bool:
+        posted = message.date
+        if posted is not None and posted.tzinfo is None:
+            posted = posted.replace(tzinfo=timezone.utc)
+        prices = parse_fuel_post(
+            getattr(message, "message", None), int(message.id),
+            posted.astimezone(CAMBODIA_TIMEZONE).isoformat() if posted is not None else "",
+        )
+        if prices is None:
+            return False
+        logger.info("Fuel prices read from the Ministry channel (valid from %s)", prices.valid_from or "?")
+        self.state_callback("fuel_prices", prices.as_dict())
+        return True
+
+    async def _handle_fuel_post(self, event) -> None:
+        if getattr(event, "chat_id", None) != FUEL_CHANNEL_ID:
+            return
+        try:
+            self._publish_fuel_post(event.message)
+        except Exception as exc:
+            logger.warning("Could not read a Ministry fuel post (%s)", type(exc).__name__)
+
+    async def _load_latest_fuel_post(self, client) -> None:
+        if self._fuel_channel is None:
+            logger.warning("Ministry fuel channel is not available to the rate-group account")
+            return
+        client.add_event_handler(self._handle_fuel_post, events.NewMessage(chats=self._fuel_channel))
+        client.add_event_handler(self._handle_fuel_post, events.MessageEdited(chats=self._fuel_channel))
+        try:
+            for message in await client.get_messages(self._fuel_channel, limit=FUEL_HISTORY_MESSAGES):
+                if self._publish_fuel_post(message):
+                    return
+            logger.warning("No fuel-price post found in the latest Ministry channel messages")
+        except Exception as exc:
+            logger.warning("Could not read Ministry fuel history (%s)", type(exc).__name__)
 
     async def _publish_message(self, message, edited: bool = False) -> None:
         message_id = int(message.id)
@@ -226,6 +273,7 @@ class RateGroupReader:
             history = await client.get_messages(group, limit=MAX_HISTORY_MESSAGES)
             for message in reversed(list(history)):
                 await self._publish_message(message)
+            await self._load_latest_fuel_post(client)
             self.state_callback("rate_group_status", "CONNECTED · PRIVATE GROUP")
             await client.run_until_disconnected()
         except TargetGroupUnavailableError:

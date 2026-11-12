@@ -1,4 +1,5 @@
 import hashlib
+import json
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
@@ -58,6 +59,11 @@ class PaymentStore:
                 rate_date TEXT PRIMARY KEY,
                 official_rate TEXT NOT NULL,
                 recorded_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS fuel_price_cache (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                payload TEXT NOT NULL,
+                saved_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS scheduled_announcements (
                 schedule_date TEXT NOT NULL,
@@ -168,6 +174,28 @@ class PaymentStore:
                    FROM exchange_rate_cache ORDER BY source"""
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def save_fuel_prices(self, prices: dict[str, object]) -> None:
+        """Keep the latest Ministry fuel-price post (display only)."""
+        payload = json.dumps(prices, ensure_ascii=False, sort_keys=True)
+        with self._lock:
+            self._connection.execute(
+                """INSERT INTO fuel_price_cache(id, payload, saved_at) VALUES (1, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, saved_at=excluded.saved_at""",
+                (payload, datetime.now(_CAMBODIA).isoformat()),
+            )
+            self._connection.commit()
+
+    def load_fuel_prices(self) -> Optional[dict[str, object]]:
+        with self._lock:
+            row = self._connection.execute("SELECT payload FROM fuel_price_cache WHERE id = 1").fetchone()
+        if row is None:
+            return None
+        try:
+            value = json.loads(row["payload"])
+        except (TypeError, ValueError):
+            return None
+        return value if isinstance(value, dict) else None
 
     def claim_scheduled_announcement(self, schedule_date: str, slot: str) -> bool:
         with self._lock:

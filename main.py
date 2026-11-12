@@ -12,6 +12,7 @@ from app.config import load_settings, update_env_file
 from app.dashboard import Dashboard
 from app.database import PaymentStore
 from app.exchange_rates import ExchangeRateMonitor, load_rate_rows
+from app.fuel_prices import FuelPrices, merge_with_previous
 from app.integration_api import IntegrationRuntimeStatus, IntegrationServer
 from app.rate_group_reader import RateGroupReader
 from app.scheduled_announcements import HOURLY_LATE_LIMIT_SECONDS, ScheduledTimeAnnouncementService
@@ -96,10 +97,39 @@ def _run_application() -> int:
         initial_exchange_rates = {}
     integration_status = IntegrationRuntimeStatus(settings.production_ready)
     integration_server = build_integration_server(settings, store, integration_status)
-    rate_group_reader = RateGroupReader(
-        settings,
-        lambda event, value: dashboard.publish(event, value) if dashboard else None,
-    )
+
+    def load_saved_fuel_prices():
+        try:
+            saved = store.load_fuel_prices()
+        except Exception:
+            logging.getLogger(__name__).exception("Could not load saved fuel prices")
+            return None
+        return FuelPrices.from_dict(saved) if saved else None
+
+    def reader_event(event: str, value: object) -> None:
+        if event == "fuel_prices" and isinstance(value, dict):
+            value = handle_fuel_prices(value)
+            if value is None:
+                return
+        if dashboard:
+            dashboard.publish(event, value)
+
+    def handle_fuel_prices(value: dict) -> dict | None:
+        """Keep the newest Ministry post; returns what the dashboard should show, or None."""
+        new = FuelPrices.from_dict(value)
+        if new is None:
+            return None
+        merged = merge_with_previous(new, load_saved_fuel_prices())
+        if merged is None:
+            return None
+        try:
+            store.save_fuel_prices(merged.as_dict())
+        except Exception:
+            logging.getLogger(__name__).exception("Could not save fuel prices")
+        return merged.as_dict()
+
+    rate_group_reader = RateGroupReader(settings, reader_event)
+    initial_fuel_prices = load_saved_fuel_prices()
 
     def audio_status(item: AudioItem, status: str) -> None:
         if item.purpose == "scheduled_time":
@@ -140,6 +170,7 @@ def _run_application() -> int:
         stop_rate_group_reader=lambda: rate_group_reader.stop(wait=False),
         initial_exchange_rates=initial_exchange_rates,
         nbc_history=store.load_nbc_history,
+        initial_fuel_prices=initial_fuel_prices.as_dict() if initial_fuel_prices else None,
     )
     rate_monitor = ExchangeRateMonitor(
         store,

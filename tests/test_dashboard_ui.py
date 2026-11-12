@@ -350,7 +350,8 @@ def test_dashboard_uses_half_and_quarter_columns_with_private_card():
         assert dashboard.controls_card.master is dashboard.operations_body
         assert dashboard.status_card.master is dashboard.operations_body
         assert dashboard.today_card.master is dashboard.operations_body
-        assert dashboard.today_strip_label.cget("text") == "Today 3 payments · KHR 52,000 · USD 12.50"
+        assert not hasattr(dashboard, "today_strip_label")
+        assert "TODAY  3 payments  ·  KHR 52,000  ·  USD 12.50" in dashboard.ticker_text()
         assert not hasattr(dashboard, "rate_group_unverified_label")
         dashboard._apply_rate_group_status("CONNECTED · PRIVATE GROUP")
         assert dashboard.rate_status_label.cget("text") == "●"
@@ -650,3 +651,40 @@ def test_payment_amount_shows_banknote_at_digit_height_on_one_line():
         assert not dashboard.amount_note_label.winfo_manager()
     finally:
         dashboard.root.destroy()
+
+
+def test_ticker_sits_beside_the_tabs_scrolls_and_shows_fuel_prices():
+    dashboard = _make_dashboard(today_summary=lambda: {"count": 2, "KHR": "8000", "USD": "1.5"})
+    try:
+        for geometry in ("900x600", "1180x800", "1382x744"):
+            _layout(dashboard, geometry)
+            dashboard._position_ticker()
+            dashboard.root.update_idletasks()
+            tabs_right, tab_height = dashboard._ticker_tabs
+            assert dashboard.ticker.winfo_manager() == "place"
+            left = dashboard.ticker.winfo_x() - dashboard.notebook.winfo_x()  # notebook coordinates
+            assert left >= tabs_right  # never covers the tabs
+            assert dashboard.ticker.winfo_y() == dashboard.notebook.winfo_y()
+            assert dashboard.ticker.winfo_height() == tab_height
+            assert left + dashboard.ticker.winfo_width() <= dashboard.notebook.winfo_width()
+        # The status shares the title row, and the list title is gone.
+        assert dashboard.announcement_label.master is dashboard.payment_title_row
+        assert not any(
+            isinstance(child, tk.Label) and "RECENT" in str(child.cget("text"))
+            for child in dashboard.recent_card.winfo_children()
+        )
+        first = dashboard.ticker.coords(dashboard.ticker.find_withtag("ticker")[0])[0]
+        for _ in range(5):
+            dashboard._tick_ticker()
+        assert dashboard.ticker.coords(dashboard.ticker.find_withtag("ticker")[0])[0] < first
+        assert "TODAY  2 payments  ·  KHR 8,000  ·  USD 1.50" in dashboard.ticker_text()
+        dashboard.publish("fuel_prices", {
+            "regular": 4350, "diesel": 5300, "regular_change": -700, "diesel_change": -350,
+            "valid_from": "2099-11-11", "valid_to": "2099-11-21", "message_id": 1, "posted_at": "",
+        })
+        dashboard._drain_events()
+        texts = [dashboard.ticker.itemcget(item, "text") for item in dashboard.ticker.find_withtag("ticker")]
+        assert "4,350៛" in texts and " ▼700" in texts
+    finally:
+        dashboard.root.destroy()
+    assert dashboard._ticker_after_id is None

@@ -22,6 +22,7 @@ from .exchange_rates import (
     gold_local_units,
     rate_trend,
 )
+from .fuel_prices import FUEL_LABELS, FuelPrices, fuel_period_text, fuel_prices_are_stale
 from .models import ParserStatus
 from .payment_parser import build_announcement, parse_payment
 from .rate_post_format import (
@@ -70,6 +71,11 @@ NBC_FIGURE_COLORS = {"up": "#4ADE80", "down": "#FACC15"}
 NBC_CARD_TITLE = "អត្រាប្តូរប្រាក់ធនាគារជាតិ"
 RATE_TABLE_HEADER_BG = "#22304A"
 HISTORY_ROW_HEIGHT = 44
+# Scrolling ticker beside the DASHBOARD / SETTINGS tabs: today's totals and Ministry fuel prices.
+TICKER_INTERVAL_MS = 40
+TICKER_STEP_PX = 1.6  # about 40 px per second
+TICKER_GAP_PX = 90
+TICKER_FONT_SIZE = 12
 
 
 def rounded_rect_path(x0: float, y0: float, x1: float, y1: float, radius: float, steps: int = 8) -> list[tuple[float, float]]:
@@ -340,6 +346,48 @@ def best_bank_rates(rates: dict[str, ExchangeRate], now: datetime) -> tuple[set[
     )
 
 
+def _is_khmer(text: str) -> bool:
+    return any("\u1780" <= character <= "\u17ff" for character in text)
+
+
+def ticker_segments(
+    summary: dict[str, object], fuel: Optional[FuelPrices], today,
+) -> list[tuple[str, str]]:
+    """(text, colour) pieces for the tab-bar ticker: today's totals, then regular and diesel prices."""
+    try:
+        khr = int(Decimal(str(summary.get("KHR", "0"))))
+        usd = Decimal(str(summary.get("USD", "0")))
+        count = int(summary.get("count", 0))
+    except (InvalidOperation, TypeError, ValueError):
+        khr, usd, count = 0, Decimal("0"), 0
+    noun = "payment" if count == 1 else "payments"
+    segments = [
+        ("TODAY", "text"), (f"  {count} {noun}", "text"), ("  ·  ", "muted"),
+        (f"KHR {khr:,}", "green"), ("  ·  ", "muted"), (f"USD {usd:,.2f}", "green"),
+        ("          FUEL  ", "amber"),
+    ]
+    if fuel is None:
+        segments.append((f"{FUEL_LABELS['regular']} …  ·  {FUEL_LABELS['diesel']} …", "muted"))
+        return segments
+    stale = fuel_prices_are_stale(fuel, today)
+    price_color = "muted" if stale else "amber"
+    for index, key in enumerate(("regular", "diesel")):
+        if index:
+            segments.append(("  ·  ", "muted"))
+        segments.append((f"{FUEL_LABELS[key]} ", price_color))
+        segments.append((f"{getattr(fuel, key):,}៛", price_color))
+        change = getattr(fuel, f"{key}_change")
+        if change:
+            arrow_color = "muted" if stale else ("red" if change > 0 else "green")
+            segments.append((f" {'▲' if change > 0 else '▼'}{abs(change):,}", arrow_color))
+    period = fuel_period_text(fuel)
+    if period:
+        segments.append((f"   ({period})", "muted"))
+    if stale:
+        segments.append(("  · OLD", "muted"))
+    return segments
+
+
 def today_strip_text(summary: dict[str, object]) -> str:
     """Slim payment-card footer, e.g. "Today 23 payments · KHR 1,250,000 · USD 340.00"."""
     try:
@@ -497,6 +545,7 @@ class Dashboard:
         stop_rate_group_reader: Optional[Callable[[], None]] = None,
         initial_exchange_rates: Optional[dict[str, ExchangeRate]] = None,
         nbc_history: Optional[Callable[[int], list[Decimal]]] = None,
+        initial_fuel_prices: Optional[dict[str, object]] = None,
     ):
         self.root = tk.Tk()
         self.root.title("ABA Payment Speaker")
@@ -537,6 +586,15 @@ class Dashboard:
         self._rate_group_summary_trend: dict[str, tuple[Optional[Decimal], Optional[Decimal]]] = {}
         self._rate_group_narrow: Optional[bool] = None
         self.exchange_rates = dict(initial_exchange_rates or {})
+        self.fuel_prices: Optional[FuelPrices] = FuelPrices.from_dict(initial_fuel_prices) if initial_fuel_prices else None
+        self._today_summary: dict[str, object] = {"count": 0, "KHR": "0", "USD": "0.00"}
+        self._ticker_after_id = None
+        self._ticker_offset = 0.0
+        self._ticker_cycle = 0.0
+        self._ticker_drawn: Optional[tuple] = None
+        self._ticker_date = None
+        self._ticker_tabs: Optional[tuple[int, int]] = None
+        self._ticker_fonts: dict[bool, tkfont.Font] = {}
         self.rate_display_labels: dict[str, dict[str, tk.Label]] = {}
         self._responsive_title_fonts: dict[tk.Label, tkfont.Font] = {}
         self._responsive_title_sizes: dict[tk.Label, int] = {}
@@ -648,6 +706,7 @@ class Dashboard:
         self.main_tab = tk.Frame(self.notebook, bg=COLORS["background"]); self.diagnostics_tab = tk.Frame(self.notebook, bg=COLORS["background"])
         self.notebook.add(self.main_tab, text="  DASHBOARD  "); self.notebook.add(self.diagnostics_tab, text="  SETTINGS & DIAGNOSTICS  ")
         self._build_main_tab(); self._build_diagnostics_tab(); self.notebook.select(self.main_tab)
+        self._build_ticker()
 
     def _configure_styles(self) -> None:
         style = ttk.Style(self.root)
@@ -693,16 +752,19 @@ class Dashboard:
         body.grid_rowconfigure(0, weight=1)
         payment = self._card(body, row=0, column=0, sticky="nsew", padx=(0, 10), pady=(8, 0)); self.payment_card = payment
         payment.grid_columnconfigure(0, weight=1); payment.grid_rowconfigure(1, weight=1, minsize=120)
-        self._label(payment, "LAST PAYMENT RECEIVED", size=11, color="muted", weight="bold").grid(row=0, column=0, pady=(6, 0))
+        title_row = tk.Frame(payment, bg=COLORS["surface"]); title_row.grid(row=0, column=0, pady=(6, 0)); self.payment_title_row = title_row
+        self.payment_title_label = self._label(title_row, "LAST PAYMENT RECEIVED", size=11, color="muted", weight="bold")
+        self.payment_title_label.pack(side="left")
+        self._label(title_row, "  ·  ", size=11, color="muted", weight="bold").pack(side="left")
+        self.announcement_label = self._label(title_row, variable=self.values["announcement"], size=11, color="muted", weight="bold")
+        self.announcement_label.pack(side="left")
         amount_row = tk.Frame(payment, bg=COLORS["surface"]); amount_row.grid(row=1, column=0, padx=20, pady=(0, 0))
         self.amount_row = amount_row
         self.amount_note_label = tk.Label(amount_row, bg=COLORS["surface"], bd=0, padx=0, pady=0)
         self.amount_note_label.pack(side="left")
         self.amount_label = self._label(amount_row, variable=self.values["amount"], size=56, color="green", weight="bold")
         self.amount_label.pack(side="left")
-        self.announcement_label = self._label(payment, variable=self.values["announcement"], size=12, color="muted", weight="bold")
-        self.announcement_label.grid(row=2, column=0, pady=(0, 5))
-        identity = tk.Frame(payment, bg=COLORS["surface"]); identity.grid(row=3, column=0, sticky="ew", padx=18, pady=(0, 4))
+        identity = tk.Frame(payment, bg=COLORS["surface"]); identity.grid(row=2, column=0, sticky="ew", padx=18, pady=(4, 8))
         identity.grid_columnconfigure(0, weight=1, uniform="identity"); identity.grid_columnconfigure(1, weight=1, uniform="identity")
         sender = tk.Frame(identity, bg=COLORS["blue_dark"], padx=16, pady=11); sender.grid(row=0, column=0, sticky="nsew", padx=(0, 7)); self.sender_card = sender
         self._label(sender, "● FROM (SENDER)", size=9, color="blue", weight="bold").pack(anchor="w")
@@ -712,10 +774,6 @@ class Dashboard:
         self._label(bank, "▥ FROM BANK", size=9, color="purple", weight="bold").pack(anchor="w")
         self.bank_label = self._label(bank, variable=self.values["bank"], size=21, color="purple", weight="bold", anchor="w", justify="left", wraplength=220)
         self.bank_label.pack(fill="both", expand=True, pady=(3, 0))
-        self.today_strip_label = self._label(
-            payment, variable=self.values["today_strip"], size=10, color="muted", weight="bold", anchor="center",
-        )
-        self.today_strip_label.grid(row=4, column=0, sticky="ew", padx=18, pady=(0, 4))
         side = tk.Frame(body, bg=COLORS["background"]); side.grid(row=0, column=1, rowspan=2, sticky="nsew", padx=(0, 10), pady=(8, 0)); self.dashboard_side = side
         side.grid_columnconfigure(0, weight=1); side.grid_rowconfigure(0, weight=1)
         self._build_exchange_rate_card(side)
@@ -725,15 +783,14 @@ class Dashboard:
         self._build_private_rate_card(private_side)
         recent = self._card(body, row=1, column=0, sticky="nsew", padx=(0, 10), pady=(12, 0)); recent.grid_columnconfigure(0, weight=1)
         self.recent_card = recent
-        self._label(recent, "RECENT ANNOUNCED PAYMENTS — TODAY", size=10, color="muted", weight="bold").grid(row=0, column=0, columnspan=2, sticky="w", padx=18, pady=(10, 4))
-        headings = tk.Frame(recent, bg=COLORS["surface_alt"], height=34); headings.grid(row=1, column=0, columnspan=2, sticky="ew", padx=14); headings.grid_propagate(False)
+        headings = tk.Frame(recent, bg=COLORS["surface_alt"], height=34); headings.grid(row=0, column=0, columnspan=2, sticky="ew", padx=14, pady=(10, 0)); headings.grid_propagate(False)
         self.history_headings = headings
         self._configure_history_columns(headings)
         self.history_heading_labels = []
         for column, title, anchor in ((0, "AMOUNT", "w"), (1, "SENDER", "w"), (2, "BANK", "w"), (3, "TIME", "e")):
             heading = tk.Label(headings, text=title, bg=COLORS["surface_alt"], fg=COLORS["muted"], font=self._font(11, "bold"), anchor=anchor, padx=10)
             heading.grid(row=0, column=column, sticky="nsew"); self.history_heading_labels.append(heading)
-        history_panel = tk.Frame(recent, bg=COLORS["surface"]); history_panel.grid(row=2, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 8)); history_panel.grid_columnconfigure(0, weight=1)
+        history_panel = tk.Frame(recent, bg=COLORS["surface"]); history_panel.grid(row=1, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 8)); history_panel.grid_columnconfigure(0, weight=1)
         self.history_canvas = tk.Canvas(history_panel, bg=COLORS["surface"], height=132, highlightthickness=0, bd=0)
         self.history_canvas.grid(row=0, column=0, sticky="ew")
         self.history_scrollbar = ttk.Scrollbar(history_panel, orient="vertical", command=self.history_canvas.yview)
@@ -1301,10 +1358,109 @@ class Dashboard:
                 else:
                     label.configure(fg=rate_pulse_color(base, highlight, progress))
 
+    def _build_ticker(self) -> None:
+        """Scrolling strip in the empty part of the tab row (never covers the tabs)."""
+        self.ticker = tk.Canvas(self.root, bg=COLORS["background"], highlightthickness=0, bd=0, height=30)
+        self.notebook.bind("<Configure>", self._position_ticker, add="+")
+        self._ticker_after_id = self.root.after(TICKER_INTERVAL_MS, self._tick_ticker)
+
+    def _tab_strip_geometry(self) -> Optional[tuple[int, int]]:
+        """(right edge of the last tab, tab-row height) in notebook coordinates."""
+        notebook = self.notebook
+        width = notebook.winfo_width()
+        if width <= 1:
+            return None
+
+        def on_tab(x: int, y: int) -> bool:
+            try:
+                return notebook.index(f"@{x},{y}") != ""
+            except tk.TclError:
+                return False
+
+        height = max((y + 1 for y in range(0, 80) if on_tab(10, y)), default=0)
+        if not height:
+            return None
+        middle = height // 2
+        right = max((x + 1 for x in range(0, width, 2) if on_tab(x, middle)), default=0)
+        return (right, height) if right else None
+
+    def _position_ticker(self, _event=None) -> None:
+        geometry = self._tab_strip_geometry()
+        if geometry is None:
+            return
+        self._ticker_tabs = geometry
+        right, height = geometry
+        left = right + 18
+        width = self.notebook.winfo_width() - left
+        if width < 120:
+            self.ticker.place_forget()
+            return
+        self.ticker.place(in_=self.notebook, x=left, y=0, width=width, height=height)
+        tk.Misc.lift(self.ticker)  # Canvas.lift() raises canvas items, not the widget
+        self.ticker.update_idletasks()
+        self._render_ticker(force=True)
+
+    def ticker_text(self) -> str:
+        today = datetime.now(CAMBODIA_TIMEZONE).date()
+        return "".join(text for text, _color in ticker_segments(self._today_summary, self.fuel_prices, today))
+
+    def _ticker_font(self, khmer: bool) -> tkfont.Font:
+        if khmer not in self._ticker_fonts:
+            family = self.rate_group_font if khmer else self.figure_font
+            self._ticker_fonts[khmer] = tkfont.Font(root=self.root, family=family, size=TICKER_FONT_SIZE, weight="bold")
+        return self._ticker_fonts[khmer]
+
+    def _render_ticker(self, force: bool = False) -> None:
+        if not hasattr(self, "ticker"):
+            return
+        today = datetime.now(CAMBODIA_TIMEZONE).date()
+        segments = ticker_segments(self._today_summary, self.fuel_prices, today)
+        canvas_width = self.ticker.winfo_width()
+        canvas_height = self.ticker.winfo_height()
+        key = (tuple(segments), canvas_width, canvas_height)
+        if not force and key == self._ticker_drawn:
+            return
+        self._ticker_drawn = key
+        self._ticker_date = today
+        self.ticker.delete("ticker")
+        if canvas_width <= 1:
+            self._ticker_cycle = 0.0
+            return
+        pieces = [(text, color, self._ticker_font(_is_khmer(text))) for text, color in segments]
+        content = sum(font.measure(text) for text, _color, font in pieces)
+        cycle = float(content + TICKER_GAP_PX)
+        self._ticker_cycle = cycle
+        if not -cycle < self._ticker_offset <= 0:
+            self._ticker_offset = 0.0
+        y = canvas_height / 2
+        x = self._ticker_offset
+        for _copy in range(max(2, math.ceil(canvas_width / cycle) + 1)):
+            for text, color, font in pieces:
+                self.ticker.create_text(x, y, text=text, fill=COLORS[color], font=font, anchor="w", tags=("ticker",))
+                x += font.measure(text)
+            x += TICKER_GAP_PX
+
+    def _tick_ticker(self) -> None:
+        self._ticker_after_id = None
+        try:
+            if datetime.now(CAMBODIA_TIMEZONE).date() != self._ticker_date:
+                self._render_ticker(force=True)
+            if self._ticker_cycle > 0:
+                step = TICKER_STEP_PX
+                self._ticker_offset -= step
+                if self._ticker_offset <= -self._ticker_cycle:
+                    self._ticker_offset += self._ticker_cycle
+                    self.ticker.move("ticker", self._ticker_cycle - step, 0)
+                else:
+                    self.ticker.move("ticker", -step, 0)
+            self._ticker_after_id = self.root.after(TICKER_INTERVAL_MS, self._tick_ticker)
+        except tk.TclError:
+            return
+
     def _on_root_destroy(self, event) -> None:
         if event.widget is not self.root:
             return
-        for attribute in ("_rate_pulse_after_id", "_rate_group_start_after_id", "_rate_group_glow_after_id"):
+        for attribute in ("_rate_pulse_after_id", "_rate_group_start_after_id", "_rate_group_glow_after_id", "_ticker_after_id"):
             after_id = getattr(self, attribute, None)
             if after_id is not None:
                 try:
@@ -1897,6 +2053,8 @@ class Dashboard:
         except Exception: summary = {"count": self.count_today(), "KHR": "0", "USD": "0.00"}
         self.values["today"].set(str(summary.get("count", 0))); self.values["today_khr"].set(format_payment_amount(summary.get("KHR", "0"), "KHR")); self.values["today_usd"].set(format_payment_amount(summary.get("USD", "0"), "USD"))
         self.values["today_strip"].set(today_strip_text(summary))
+        self._today_summary = summary
+        self._render_ticker()
         try: rows = self.recent_payments(1000)
         except Exception: rows = []
         self._render_history(rows)
@@ -2138,6 +2296,9 @@ class Dashboard:
                 self._reload_nbc_history()
                 self._refresh_exchange_rate_display()
                 self._render_rate_group_messages(keep_scroll=True)
+            elif event == "fuel_prices" and isinstance(value, dict):
+                self.fuel_prices = FuelPrices.from_dict(value) or self.fuel_prices
+                self._render_ticker()
             elif event == "speaker": self.values["speaker"].set(str(value))
             elif event == "payment": self._apply_payment(value)
             elif event == "announcement_status": self._apply_announcement_status(value)
