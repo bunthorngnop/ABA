@@ -25,6 +25,8 @@ logs/*.log*
 *.docx
 /nbc_logo.png
 /pboc_logo.png
+/Golden Wing Coin Emblem.png
+/Neon Glassmorphism UI Banner.png
 
 # Review material and agent reports (kept in Dropbox, not in Git)
 reports/

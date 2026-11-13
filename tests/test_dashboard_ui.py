@@ -780,3 +780,25 @@ def test_rate_status_uses_owner_khmer_wording():
     assert rate_status_khmer(rates, now + timedelta(minutes=2)) == "បច្ចុប្បន្នភាពចុងក្រោយ 2 នាទី"
     assert rate_status_khmer(rates, now + timedelta(minutes=135)) == "បច្ចុប្បន្នភាពចុងក្រោយ 2 ម៉ោង"
     assert rate_status_khmer({}, now) == "កំពុងទាញយកអត្រា…"
+
+
+def test_brand_card_matches_nbc_card_with_coin_name_and_tagline():
+    dashboard = _make_dashboard(initial_exchange_rates=_rates())
+    try:
+        for geometry in ("900x600", "1382x744"):
+            _layout(dashboard, geometry)
+            dashboard._brand_drawn = None
+            dashboard._draw_brand_card()
+            canvas = dashboard.brand_canvas
+            assert int(canvas.cget("height")) == int(dashboard.nbc_canvas.cget("height"))  # same card height
+            assert dashboard.brand_text("shop") == "វីង វណ្ណា-ស្រីម៉ិច"
+            assert dashboard.brand_text("tagline") == "ប្រព័ន្ធហិរញ្ញវត្ថុឆ្លាតវៃ"
+            assert canvas.find_withtag("brand_coin")  # the owner's gold Wing coin
+            assert canvas.find_withtag("brand_highlight") and canvas.find_withtag("brand_divider")
+            for tag in ("shop", "tagline", "coin"):
+                x0, y0, x1, y1 = canvas.bbox(canvas.find_withtag(f"brand_{tag}")[0])
+                assert x0 >= 0 and y0 >= 0 and x1 <= canvas.winfo_width() and y1 <= int(canvas.cget("height"))
+            clock_left = dashboard.clock_label.winfo_rootx()
+            assert canvas.winfo_rootx() + canvas.winfo_width() <= clock_left  # never covers the clock
+    finally:
+        dashboard.root.destroy()

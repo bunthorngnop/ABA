@@ -188,7 +188,7 @@ The payment listener pings Telegram every 30 seconds. If payment monitoring stay
 
 ### Header and LIVE status
 
-Since 2026-11-13 the LIVE status (`● LIVE`, `● SETUP MODE`, `⊘ MUTED`, `● CONNECTING`) sits at the right end of the `LAST PAYMENT RECEIVED · ✓ ANNOUNCED` row (that row's text shrinks on narrow windows so nothing overlaps), and the header date under the clock is larger (18 pt, 15 pt below 1080 px) in a lighter grey.
+The header's left column is a brand card in the same glass style as the NBC card (shared drawing): the owner's gold **Wing** coin (`assets/brand_coin_72.png`, `brand_coin_56.png` narrow; made from the owner-supplied image with its edge fringe cleaned), `វីង វណ្ណា-ស្រីម៉ិច` in white Khmer OS Muol Light, a thin gold divider, and the system name `ប្រព័ន្ធហិរញ្ញវត្ថុឆ្លាតវៃ` in green Siemreap, with a soft glass highlight at the top left. Text sizes fit the card at every window width. Since 2026-11-13 the LIVE status (`● LIVE`, `● SETUP MODE`, `⊘ MUTED`, `● CONNECTING`) sits at the right end of the `LAST PAYMENT RECEIVED · ✓ ANNOUNCED` row (that row's text shrinks on narrow windows so nothing overlaps), and the header date under the clock is larger (18 pt, 15 pt below 1080 px) in a lighter grey.
 
 ### USD/CNY official rate (rates card, third row)
 

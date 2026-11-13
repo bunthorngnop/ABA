@@ -88,6 +88,13 @@ CNY_FIGURE_SAMPLE = "6.7174"
 NBC_CARD_HEIGHTS = {False: 132, True: 112}
 NBC_CARD_FILL = "#0E1626"
 NBC_BORDER_GRADIENT = ("#22D3EE", "#8B5CF6")
+# Brand card (2026-11-13): glass card like the NBC card, with the owner's gold "Wing" coin.
+BRAND_SHOP_NAME = "វីង វណ្ណា-ស្រីម៉ិច"
+BRAND_TAGLINE = "ប្រព័ន្ធហិរញ្ញវត្ថុឆ្លាតវៃ"
+BRAND_SHOP_FONT = "Khmer OS Muol Light"
+BRAND_COIN_FILES = {False: "brand_coin_72.png", True: "brand_coin_56.png"}
+BRAND_DIVIDER = "#F2C14E"
+BRAND_HIGHLIGHT = "#13233A"
 NBC_PILL_COLORS = {"up": ("#0F3B2A", "#4ADE80"), "down": ("#3A3010", "#FACC15"), "flat": ("#1B2436", "#94A3B8")}
 NBC_FIGURE_COLORS = {"up": "#4ADE80", "down": "#FACC15"}
 NBC_CARD_TITLE = "អត្រាប្តូរប្រាក់ធនាគារជាតិ"
@@ -805,11 +812,7 @@ class Dashboard:
         for column, weight in enumerate((30, 40, 30)):
             header.grid_columnconfigure(column, weight=weight, uniform="header_columns")
         header.grid_rowconfigure(0, weight=1)
-        title = tk.Frame(header, bg=COLORS["background"]); title.grid(row=0, column=0, sticky="w"); self.title_frame = title
-        self.title_primary_label = self._label(title, "វីង វណ្ណា-ស្រីម៉ិច", size=24, family=self.khmer_title_font)
-        self.title_primary_label.pack(anchor="w")
-        self.title_secondary_label = self._label(title, "ប្រព័ន្ធទទួលប្រាក់", size=24, color="green", family=self.khmer_title_font)
-        self.title_secondary_label.pack(anchor="w")
+        self._build_brand_card(header)
         clock = tk.Frame(header, bg=COLORS["background"]); clock.grid(row=0, column=1, sticky="nsew"); self.clock_frame = clock
         self.clock_label = self._label(clock, variable=self.values["clock"], size=56, weight="bold")
         self.clock_label.pack(anchor="center")
@@ -1059,6 +1062,88 @@ class Dashboard:
             "sell_cell": None,
         }
 
+    def _build_brand_card(self, header) -> None:
+        """Brand card in the header's left column: the same glass card as NBC, coin, name and tagline."""
+        canvas = tk.Canvas(header, height=NBC_CARD_HEIGHTS[False], bg=COLORS["background"], highlightthickness=0, bd=0)
+        canvas.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+        self.brand_canvas = canvas
+        self.title_frame = canvas
+        self._brand_coins = {narrow: load_asset_image(self.root, name) for narrow, name in BRAND_COIN_FILES.items()}
+        self.brand_shop_family = self._installed_font(BRAND_SHOP_FONT, self.khmer_title_font)
+        canvas.bind("<Configure>", lambda _event: self._draw_brand_card(), add="+")
+
+    def _draw_glass_card(self, canvas: tk.Canvas, width: int, height: int, highlight: bool = False) -> None:
+        """Dark rounded card with the cyan-to-violet border (shared by the NBC and brand cards)."""
+        inset = 2
+        path = rounded_rect_path(inset, inset, width - inset, height - inset, 16)
+        canvas.create_polygon(*[value for point in path for value in point], fill=NBC_CARD_FILL, outline="")
+        if highlight:
+            # Soft glass sweep in the top-left corner, kept inside the rounded card.
+            corner = rounded_rect_path(inset, inset, width - inset, height - inset, 16)
+            top_left = [point for point in corner if point[0] <= inset + 16 and point[1] <= inset + 16]
+            reach_x, reach_y = width * 0.42, height * 0.86
+            curve = [
+                (reach_x - (reach_x - inset - 1) * (1 - (1 - t) ** 2), inset + 1 + (reach_y - inset - 1) * t * t)
+                for t in (i / 12 for i in range(13))
+            ]
+            sweep = sorted(top_left, key=lambda point: -point[1]) + curve
+            canvas.create_polygon(*[value for point in sweep for value in point], fill=BRAND_HIGHLIGHT, outline="",
+                                  tags=("brand_highlight",))
+        span = max(1.0, width - 2 * inset)
+        for (x1, y1), (x2, y2) in zip(path, path[1:] + path[:1]):
+            progress = ((x1 + x2) / 2 - inset) / span
+            canvas.create_line(x1, y1, x2, y2, fill=rate_pulse_color(*NBC_BORDER_GRADIENT, progress), width=2)
+        canvas.create_line(22, inset + 1, width - 22, inset + 1, fill="#2A3A5A")
+
+    def brand_text(self, tag: str) -> str:
+        items = self.brand_canvas.find_withtag(f"brand_{tag}")
+        return self.brand_canvas.itemcget(items[0], "text") if items else ""
+
+    def _draw_brand_card(self) -> None:
+        canvas = self.brand_canvas
+        width = canvas.winfo_width()
+        height = int(canvas.cget("height"))
+        if width <= 40:
+            return
+        narrow = bool(self._rate_group_narrow)
+        key = (width, height, narrow)
+        if getattr(self, "_brand_drawn", None) == key:
+            return
+        self._brand_drawn = key
+        canvas.delete("all")
+        self._draw_glass_card(canvas, width, height, highlight=True)
+        coin = self._brand_coins.get(narrow) or self._brand_coins.get(not narrow)
+        coin_size = coin.width() if coin is not None else 0
+        left = 16 if not narrow else 12
+        cy = height / 2
+        if coin is not None:
+            canvas.create_image(left + coin_size / 2, cy, image=coin, tags=("brand_coin",))
+        text_left = left + coin_size + (14 if not narrow else 10)
+        available = max(40, width - text_left - (16 if not narrow else 12))
+        shop_size = 24 if not narrow else 18
+        while shop_size > 9 and tkfont.Font(root=self.root, family=self.brand_shop_family, size=shop_size).measure(
+            BRAND_SHOP_NAME
+        ) > available:
+            shop_size -= 1
+        shop_font = tkfont.Font(root=self.root, family=self.brand_shop_family, size=shop_size)
+        shop_width = shop_font.measure(BRAND_SHOP_NAME)
+        tag_size = 17 if not narrow else 13
+        while tag_size > 8 and tkfont.Font(root=self.root, family=self.rate_group_font, size=tag_size).measure(
+            BRAND_TAGLINE
+        ) > shop_width:
+            tag_size -= 1
+        tag_font = tkfont.Font(root=self.root, family=self.rate_group_font, size=tag_size)
+        shop_height = shop_font.metrics("linespace")
+        tag_height = tag_font.metrics("linespace")
+        top = cy - (shop_height + 6 + tag_height) / 2
+        canvas.create_text(text_left, top + shop_height / 2, text=BRAND_SHOP_NAME, anchor="w", fill=COLORS["text"],
+                           font=shop_font, tags=("brand_shop",))
+        divider_y = top + shop_height + 2
+        canvas.create_line(text_left, divider_y, text_left + shop_width, divider_y, fill=BRAND_DIVIDER, width=1,
+                           tags=("brand_divider",))
+        canvas.create_text(text_left + shop_width / 2, divider_y + 4 + tag_height / 2, text=BRAND_TAGLINE,
+                           anchor="center", fill=COLORS["green"], font=tag_font, tags=("brand_tagline",))
+
     def _build_nbc_header_card(self, header) -> None:
         """Modern 'glass ticker' NBC card drawn on a canvas in the header's right column."""
         canvas = tk.Canvas(
@@ -1097,15 +1182,7 @@ class Dashboard:
         state = self._nbc_state
         narrow = bool(self._rate_group_narrow)
         stale = bool(state.get("stale"))
-        inset = 2
-        path = rounded_rect_path(inset, inset, width - inset, height - inset, 16)
-        canvas.create_polygon(*[value for point in path for value in point], fill=NBC_CARD_FILL, outline="")
-        span = max(1.0, width - 2 * inset)
-        for (x1, y1), (x2, y2) in zip(path, path[1:] + path[:1]):
-            progress = ((x1 + x2) / 2 - inset) / span
-            color = rate_pulse_color(*NBC_BORDER_GRADIENT, progress)
-            canvas.create_line(x1, y1, x2, y2, fill=color, width=2)
-        canvas.create_line(22, inset + 1, width - 22, inset + 1, fill="#2A3A5A")
+        self._draw_glass_card(canvas, width, height)
         left = 18
         top = 20 if not narrow else 17
         dot_color = COLORS["muted"] if stale else "#4ADE80"
@@ -1992,9 +2069,6 @@ class Dashboard:
         self.header.configure(padx=18 if compact or narrow_header else 28, pady=3)
         if layout_key != self._layout_mode:
             self._layout_mode = layout_key
-            title_size = 20 if narrow_header else 24
-            self.title_primary_label.configure(font=self._font(title_size, family=self.khmer_title_font))
-            self.title_secondary_label.configure(font=self._font(title_size, family=self.khmer_title_font))
             self.clock_label.configure(font=self._font(42 if narrow_header else 56, "bold"))
             self.date_label.configure(font=self._font(15 if narrow_header else 18, "bold"))
         if self._rate_group_narrow != narrow_header:
@@ -2005,6 +2079,9 @@ class Dashboard:
             self._refresh_exchange_rate_display()
             self.nbc_canvas.configure(height=NBC_CARD_HEIGHTS[narrow_header])
             self._draw_nbc_card()
+            self.brand_canvas.configure(height=NBC_CARD_HEIGHTS[narrow_header])
+            self._brand_drawn = None
+            self._draw_brand_card()
             self._history_narrow = narrow_header
             self._apply_history_columns(narrow_header)
             self._render_history(self._history_rows)
