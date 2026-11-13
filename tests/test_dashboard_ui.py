@@ -239,25 +239,38 @@ def test_rates_table_with_official_cny_row_and_nbc_glass_card_show_figures_and_a
     )
     try:
         _layout(dashboard, "1382x744")
-        assert dashboard.rate_title_label.cget("text").replace("\n", " ") == "អត្រាប្តូរប្រាក់ រៀល ដុល្លារ និងយ័ន (ចិន)"
-        assert [dashboard.rate_table_headers[column].cget("text") for column in range(3)] == ["BANK", "ទិញ $", "លក់ $"]
+        assert dashboard.rate_title_label.cget("text").replace("\n", " ") == "អត្រាប្តូរប្រាក់ ខ្មែរ ដុល្លារ និងចិន"
+        assert [dashboard.rate_table_headers[column].cget("text") for column in range(2)] == [
+            "ធនាគារ", "លុយដុល្លារដូរយកលុយរៀល",
+        ]
+        assert len(dashboard.rate_table_headers) == 2  # the sell column is gone
+        assert dashboard.rate_title_band.cget("bg") == "#123D3A"
+        assert dashboard.rate_title_label.cget("fg") == "#FFE08A"
+        assert tkfont.Font(root=dashboard.root, font=dashboard.rate_title_label.cget("font")).actual("family") == "Bokor"
+        assert dashboard.rate_age_label.master is dashboard.rate_title_band  # status line under the title
         assert list(dashboard.rate_display_labels) == ["ACLEDA", "WING", "CNY"]
         labels = dashboard.rate_display_labels
-        assert (labels["ACLEDA"]["buy"].cget("text"), labels["ACLEDA"]["sell"].cget("text")) == ("4,081", "4,095")
-        assert (labels["WING"]["buy"].cget("text"), labels["WING"]["sell"].cget("text")) == ("4,083", "4,093")
+        assert labels["ACLEDA"]["buy"].cget("text") == "4,081" and labels["ACLEDA"]["sell"] is None
+        assert labels["WING"]["buy"].cget("text") == "4,083" and labels["WING"]["sell"] is None
         cny = labels["CNY"]
-        assert cny["bank"].cget("text") == "USD/CNY"
+        assert cny["bank"].cget("text") == "លុយយ័នចិន"
+        assert tkfont.Font(root=dashboard.root, font=cny["bank"].cget("font")).actual("family") == "Siemreap"
         assert (cny["official"].cget("text"), cny["unit"].cget("text")) == ("6.7174", "¥")
-        assert int(cny["official_cell"].grid_info()["columnspan"]) == 2  # one midpoint across ទិញ and លក់
+        assert int(cny["official_cell"].grid_info()["column"]) == 1
         assert cny["caption"].cget("text") == "PBOC central rate · 12 Nov"
         assert cny["official_arrow"].cget("text") == "▲"
         assert cny["official_arrow"].cget("fg") == RATE_TREND_COLORS["up"]
         assert str(cny["category"].cget("image"))  # the supplied logo, like the bank rows
         cny_font = tkfont.Font(root=dashboard.root, font=cny["official"].cget("font"))
         bank_font = tkfont.Font(root=dashboard.root, font=labels["ACLEDA"]["buy"].cget("font"))
-        # The lone figure fills its own cell: at least the bank size, as large as fits, never overflowing.
+        # Every figure fills its own cell; all three arrows match the yuan arrow.
         assert cny_font.cget("family") == bank_font.cget("family")
-        assert cny_font.cget("size") > bank_font.cget("size")
+        assert bank_font.cget("size") > 18
+        arrow_sizes = {
+            tkfont.Font(root=dashboard.root, font=labels[s][f].cget("font")).cget("size")
+            for s, f in (("ACLEDA", "buy_arrow"), ("WING", "buy_arrow"), ("CNY", "official_arrow"))
+        }
+        assert len(arrow_sizes) == 1
         cell = cny["official_cell"]
         content = cny["official"].master.master
         dashboard.root.update_idletasks()
@@ -269,15 +282,18 @@ def test_rates_table_with_official_cny_row_and_nbc_glass_card_show_figures_and_a
         # Unchanged figures show no arrow (never both ▲ and ▼); no cell is outlined.
         assert labels["WING"]["buy_arrow"].cget("text") == ""
         for source in ("ACLEDA", "WING"):
-            for field in ("buy", "sell"):
-                assert labels[source][f"{field}_cell"].cget("highlightbackground") == RATE_ROW_COLORS[source]
+            assert labels[source]["buy_cell"].cget("highlightbackground") == RATE_ROW_COLORS[source]
             assert labels[source]["bank"].cget("anchor") == "center"
             assert labels[source]["bank"].pack_info()["anchor"] == "center"
         for source, source_labels in labels.items():
             assert source_labels["row"].cget("bg") == RATE_ROW_COLORS[source]
         figure_font = tkfont.Font(root=dashboard.root, font=labels["ACLEDA"]["buy"].cget("font"))
-        assert (figure_font.cget("size"), figure_font.cget("family")) == (18, dashboard.figure_font)
-        assert "KHR per USD" in dashboard.rate_age_label.cget("text")
+        assert figure_font.cget("family") == dashboard.figure_font
+        for source in ("ACLEDA", "WING"):  # each figure is the largest that fits its own cell
+            cell = labels[source]["buy_cell"]
+            content = labels[source]["buy"].master
+            assert content.winfo_reqwidth() <= cell.winfo_width() and content.winfo_reqheight() <= cell.winfo_height()
+        assert dashboard.rate_age_label.cget("text") == "បច្ចុប្បន្នភាពចុងក្រោយ តិចជាង 1 នាទី"
         assert dashboard.nbc_card.master is dashboard.header
         assert isinstance(dashboard.nbc_card, tk.Canvas)
         assert dashboard.nbc_text("figure") == "4,085"
@@ -299,7 +315,7 @@ def test_rates_table_with_official_cny_row_and_nbc_glass_card_show_figures_and_a
         group_center_x = (group_left + pill_box[2]) / 2
         assert abs(group_center_x - canvas.winfo_width() / 2) <= 16
         assert abs((figure_box[1] + figure_box[3]) / 2 - int(canvas.cget("height")) / 2) <= 8
-        for column in range(3):
+        for column in range(2):
             assert dashboard.rate_table_headers[column].cget("bg") == RATE_TABLE_HEADER_BG
         assert dashboard.nbc_text("date") == "7 NOV"
         assert dashboard.nbc_text("pill") == "▲ +2"
@@ -312,7 +328,7 @@ def test_rates_table_with_official_cny_row_and_nbc_glass_card_show_figures_and_a
         dashboard._apply_rate_pulse()
         assert labels["CNY"]["official"].cget("fg") == "#FFD1D1"
         assert labels["ACLEDA"]["buy"].cget("fg") == "#FFB7C0"
-        assert labels["WING"]["sell"].cget("fg") == "#B8E7FF"
+        assert labels["WING"]["buy"].cget("fg") == "#FFB7C0"
         dashboard.exchange_rates = _rates(now)
         dashboard._refresh_exchange_rate_display()
         assert dashboard.nbc_text("pill") == ""
@@ -348,7 +364,7 @@ def test_dashboard_uses_half_and_quarter_columns_with_private_card():
         assert dashboard.rate_group_title_label.cget("text") == "អត្រាប្តូរប្រាក់ឯកជន - Private rates"
         assert dashboard.private_card.cget("bg") == COLORS["surface"]
         assert dashboard.rate_top_bar.cget("bg") == "#FFE66D"
-        assert dashboard.rate_title_label.cget("text").replace("\n", " ") == "អត្រាប្តូរប្រាក់ រៀល ដុល្លារ និងយ័ន (ចិន)"
+        assert dashboard.rate_title_label.cget("text").replace("\n", " ") == "អត្រាប្តូរប្រាក់ ខ្មែរ ដុល្លារ និងចិន"
         assert dashboard.controls_card.master is dashboard.operations_body
         assert dashboard.status_card.master is dashboard.operations_body
         assert dashboard.today_card.master is dashboard.operations_body
@@ -381,8 +397,16 @@ def test_dashboard_uses_half_and_quarter_columns_with_private_card():
             assert dashboard.nbc_card.winfo_height() <= dashboard.clock_frame.winfo_height()
             assert dashboard.nbc_card.winfo_height() == (112 if narrow else 132)
             root_center_x = dashboard.root.winfo_rootx() + int(geometry.split("x")[0]) / 2
-            for label in (dashboard.clock_label, dashboard.date_label, dashboard.live_label):
+            for label in (dashboard.clock_label, dashboard.date_label):
                 assert abs(label.winfo_rootx() + label.winfo_width() / 2 - root_center_x) < 10
+            # LIVE status now sits at the right end of the LAST PAYMENT RECEIVED row.
+            assert dashboard.live_label.master is dashboard.payment_header_row
+            live_right = dashboard.live_label.winfo_rootx() + dashboard.live_label.winfo_width()
+            title_right = dashboard.payment_title_row.winfo_rootx() + dashboard.payment_title_row.winfo_width()
+            assert title_right <= dashboard.live_label.winfo_rootx()  # never overlaps the title
+            assert live_right <= dashboard.payment_card.winfo_rootx() + dashboard.payment_card.winfo_width()
+            date_size = tkfont.Font(root=dashboard.root, font=dashboard.date_label.cget("font")).cget("size")
+            assert date_size == (15 if narrow else 18)
             clock_right = dashboard.clock_label.winfo_rootx() + dashboard.clock_label.winfo_width()
             assert clock_right <= dashboard.nbc_card.winfo_rootx()
             controls_on_top = geometry == "1382x744"
@@ -745,3 +769,14 @@ def test_cny_figure_grows_to_fill_its_cell_without_resizing_rows():
             assert size == 44 or not dashboard._cny_fits(size + 1, "6.7174", cell.winfo_width(), cell.winfo_height())
         finally:
             dashboard.root.destroy()
+
+
+def test_rate_status_uses_owner_khmer_wording():
+    from app.dashboard import rate_status_khmer
+
+    now = datetime(2026, 11, 13, 10, 0, tzinfo=CAMBODIA_TIMEZONE)
+    rates = _rates(now)
+    assert rate_status_khmer(rates, now) == "បច្ចុប្បន្នភាពចុងក្រោយ តិចជាង 1 នាទី"
+    assert rate_status_khmer(rates, now + timedelta(minutes=2)) == "បច្ចុប្បន្នភាពចុងក្រោយ 2 នាទី"
+    assert rate_status_khmer(rates, now + timedelta(minutes=135)) == "បច្ចុប្បន្នភាពចុងក្រោយ 2 ម៉ោង"
+    assert rate_status_khmer({}, now) == "កំពុងទាញយកអត្រា…"
