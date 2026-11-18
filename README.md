@@ -188,6 +188,14 @@ In addition to 16:10 / 18:10 (Thursday 16:05 / 18:05), the male voice announces 
 
 Time announcements (hourly and daily) come before payments: they jump ahead of waiting announcements and interrupt a payment announcement that is being spoken; the interrupted payment is then replayed from the beginning, so no payment is lost. As a safety net, a time announcement that still cannot start within 60 seconds of its time is skipped rather than spoken late.
 
+### Recorded time voice
+
+Every fixed time sentence (41 in total: the hourly sentences 08:00–00:00, the daily times, and the Tuesday/Thursday versions with the day first) is recorded once with the male voice and then played from disk (`%LOCALAPPDATA%\ABA Payment Speaker\time_voice\`), so time announcements play instantly, without internet and without Microsoft's 429 refusals. A background recorder fills missing recordings slowly (one every 20 seconds, starting 30 seconds after launch); a sentence that is not recorded yet is spoken live and saved. Payment speech stays live (names and amounts vary) but retries briefly (after 2 s and 5 s) when the speech service answers 429.
+
+### Lottery draw stream
+
+Every day from 16:05 to 16:40 and from 18:05 to 18:40, ABA opens `https://www.youtube.com/@xosominhngoc/live` (Xổ Số Minh Ngọc) in Microsoft Edge app mode with its own profile (`%LOCALAPPDATA%\ABA Payment Speaker\draw_stream_edge\`), with sound and autoplay, and keeps that window docked exactly over the rates card and the private-rates card (on top, compensating Windows' invisible borders). It closes it at the end of the window and when ABA exits. Each window opens once per day; if someone closes the stream it is not reopened until the next window. Edge is a separate program, so a browser problem cannot stop payment announcements. Operations → CONTROLS has **TEST DRAW STREAM (60 s)**.
+
 ### Payment-monitoring alert
 
 The payment listener pings Telegram every 30 seconds. If payment monitoring stays down for 2 minutes (including no connection at startup), the male voice says `សូមជូនដំណឹង ប្រព័ន្ធទទួលប្រាក់ត្រូវបានផ្តាច់ សូមពិនិត្យអ៊ីនធឺណិត`, or `សូមចូល Telegram ឡើងវិញ` when Telegram has revoked or expired the login, and repeats every 10 minutes until it recovers, when `ប្រព័ន្ធទទួលប្រាក់បានភ្ជាប់ឡើងវិញ` is said once. Alerts play from pre-recorded files in `assets/` (no internet needed), are heard even when the speaker is muted, run at any time of day, and are active only in production mode.

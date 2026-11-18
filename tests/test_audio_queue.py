@@ -139,3 +139,50 @@ def test_waiting_time_announcement_jumps_ahead_of_waiting_payments():
     assert audio.join(5)
     audio.stop()
     assert spoken == ["first", "time 16:28", "payment A", "payment B"]
+
+
+# --- 2026-11-18: recorded time voice and 429 retry -----------------------------------------------
+
+from pathlib import Path  # noqa: E402
+
+from app.tts import CachedSpeech as _Cached, EdgeKhmerSpeech as _Edge  # noqa: E402
+
+
+class _RateLimited(Exception):
+    status = 429
+
+
+def test_time_sentence_is_recorded_once_then_played_from_disk(tmp_path, monkeypatch):
+    played, synthesized = [], []
+    monkeypatch.setattr("app.tts.play_audio_file", lambda path: played.append(path))
+
+    def fake_synthesize(self, text, output, retry=True):
+        synthesized.append(text)
+        Path(output).write_bytes(b"mp3")
+
+    monkeypatch.setattr(_Edge, "synthesize", fake_synthesize)
+    voice = _Cached("km-KH-PisethNeural", "+0%", tmp_path)
+    voice.speak("ម៉ោង ៤ និង ២៧ នាទី រសៀល។")
+    voice.speak("ម៉ោង ៤ និង ២៧ នាទី រសៀល។")
+    assert synthesized == ["ម៉ោង ៤ និង ២៧ នាទី រសៀល។"]  # online only the first time
+    assert len(played) == 2 and played[0] == played[1] and played[0].is_file()
+    assert voice.prewarm(["a", "ម៉ោង ៤ និង ២៧ នាទី រសៀល។"], spacing_seconds=0) == 1
+    assert voice.missing(["a", "b"]) == ["b"]
+
+
+def test_speech_service_429_is_retried_briefly(monkeypatch):
+    attempts = []
+
+    class FakeCommunicate:
+        def __init__(self, *args, **kwargs): pass
+
+        async def save(self, path):
+            attempts.append(path)
+            if len(attempts) < 3:
+                raise _RateLimited()
+
+    import edge_tts
+    monkeypatch.setattr(edge_tts, "Communicate", FakeCommunicate)
+    monkeypatch.setattr("app.tts.TTS_RETRY_DELAYS_SECONDS", (0.01, 0.01))
+    _Edge().synthesize("hello", Path("unused.mp3"))
+    assert len(attempts) == 3

@@ -134,3 +134,16 @@ class ScheduledTimeAnnouncementService:
         self._stop.set()
         if self._thread.is_alive():
             self._thread.join(timeout=2)
+
+
+def all_fixed_time_texts() -> list[str]:
+    """Every time sentence the schedule can speak (for recording them once, in advance)."""
+    texts: list[str] = [hourly_announcement_text(hour) for hour in HOURLY_ANNOUNCEMENT_HOURS]
+    monday = datetime(2026, 11, 16, tzinfo=CAMBODIA_TIMEZONE)  # any Monday; weekday offsets below
+    for day in range(7):
+        times = THURSDAY_ANNOUNCEMENT_TIMES if day == THURSDAY else REGULAR_ANNOUNCEMENT_TIMES
+        for hour, minute in (*times, *DAILY_ANNOUNCEMENT_TIMES):
+            text = time_announcement_text((monday + timedelta(days=day)).replace(hour=hour, minute=minute))
+            if text not in texts:
+                texts.append(text)
+    return texts

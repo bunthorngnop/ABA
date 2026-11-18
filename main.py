@@ -2,6 +2,7 @@ import faulthandler
 import logging
 import os
 import re
+import threading
 import time
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
@@ -11,15 +12,18 @@ from app.audio_queue import AudioItem, AudioQueue
 from app.config import load_settings, update_env_file
 from app.dashboard import Dashboard
 from app.database import PaymentStore
-from app.exchange_rates import ExchangeRateMonitor, load_rate_rows
+from app.exchange_rates import CAMBODIA_TIMEZONE, ExchangeRateMonitor, load_rate_rows
 from app.fuel_prices import FuelPrices, merge_with_previous
 from app.integration_api import IntegrationRuntimeStatus, IntegrationServer
 from app.rate_group_reader import RateGroupReader
-from app.scheduled_announcements import HOURLY_LATE_LIMIT_SECONDS, ScheduledTimeAnnouncementService
+from app.scheduled_announcements import (
+    HOURLY_LATE_LIMIT_SECONDS, ScheduledTimeAnnouncementService, all_fixed_time_texts,
+)
 from app.single_instance import SingleInstanceLock
 from app.system_alerts import ALERT_TEXTS, PaymentHealthAlerts, alert_audio_path
 from app.telegram_listener import TelegramListener
-from app.tts import EdgeKhmerSpeech, RecordedSpeech
+from app.draw_stream import DrawStreamController
+from app.tts import CachedSpeech, EdgeKhmerSpeech, RecordedSpeech
 
 
 class SecretRedactingFilter(logging.Filter):
@@ -171,6 +175,7 @@ def _run_application() -> int:
         initial_exchange_rates=initial_exchange_rates,
         nbc_history=store.load_nbc_history,
         initial_fuel_prices=initial_fuel_prices.as_dict() if initial_fuel_prices else None,
+        draw_stream=draw_stream,
     )
     rate_monitor = ExchangeRateMonitor(
         store,
@@ -182,7 +187,21 @@ def _run_application() -> int:
         integration_status.update(topic, value)
         dashboard.publish(topic, value)
 
-    scheduled_voice = EdgeKhmerSpeech("km-KH-PisethNeural", settings.tts_volume)
+    # Time sentences are recorded once and then played from disk (no internet, no 429 refusals).
+    runtime_dir = settings.database_path.parent
+    scheduled_voice = CachedSpeech("km-KH-PisethNeural", settings.tts_volume, runtime_dir / "time_voice")
+    prewarm_stop = threading.Event()
+
+    def prewarm_time_voice() -> None:
+        if prewarm_stop.wait(30):
+            return
+        recorded = scheduled_voice.prewarm(all_fixed_time_texts(), stop=prewarm_stop)
+        missing = len(scheduled_voice.missing(all_fixed_time_texts()))
+        logging.getLogger(__name__).info("Time voice recordings: %s new, %s still missing", recorded, missing)
+
+    draw_stream = DrawStreamController(
+        runtime_dir / "draw_stream_edge", lambda: datetime.now(CAMBODIA_TIMEZONE),
+    )
 
     def play_system_alert(kind: str) -> None:
         # Pre-recorded files play without internet; fall back to live TTS if a file is missing.
@@ -220,6 +239,7 @@ def _run_application() -> int:
         listener.start()
         listener_started = True
         payment_alerts.start()
+        threading.Thread(target=prewarm_time_voice, name="time-voice-prewarm", daemon=True).start()
         dashboard.run()
         logging.getLogger(__name__).info("Dashboard window closed; shutting down")
     except BaseException:
@@ -228,6 +248,8 @@ def _run_application() -> int:
         raise
     finally:
         run_cleanup_steps([
+            ("draw stream", draw_stream.close),
+            ("time voice recorder", prewarm_stop.set),
             ("payment alerts", payment_alerts.stop),
             ("rate-group reader", rate_group_reader.stop),
             ("exchange-rate refresh", rate_monitor.stop if rate_monitor_started else None),

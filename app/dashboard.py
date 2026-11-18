@@ -1,4 +1,5 @@
 import json
+import logging
 import math
 import os
 import queue
@@ -661,6 +662,7 @@ class Dashboard:
         initial_exchange_rates: Optional[dict[str, ExchangeRate]] = None,
         nbc_history: Optional[Callable[[int], list[Decimal]]] = None,
         initial_fuel_prices: Optional[dict[str, object]] = None,
+        draw_stream=None,
     ):
         self.root = tk.Tk()
         self.root.title("ABA Payment Speaker")
@@ -705,6 +707,9 @@ class Dashboard:
         self._today_summary: dict[str, object] = {"count": 0, "KHR": "0", "USD": "0.00"}
         self._ticker_after_id = None
         self._ticker_offset = 0.0
+        # Lottery draw stream (separate Edge window) docked over the rates and private cards.
+        self.draw_stream = draw_stream
+        self._draw_stream_after_id = None
         self._ticker_cycle = 0.0
         self._ticker_drawn: Optional[tuple] = None
         self._ticker_date = None
@@ -825,6 +830,8 @@ class Dashboard:
         self.notebook.add(self.main_tab, text="  DASHBOARD  "); self.notebook.add(self.diagnostics_tab, text="  SETTINGS & DIAGNOSTICS  ")
         self._build_main_tab(); self._build_diagnostics_tab(); self.notebook.select(self.main_tab)
         self._build_ticker()
+        if self.draw_stream is not None:
+            self._draw_stream_after_id = self.root.after(3000, self._tick_draw_stream)
 
     def _configure_styles(self) -> None:
         style = ttk.Style(self.root)
@@ -1722,12 +1729,41 @@ class Dashboard:
         except tk.TclError:
             return
 
+    def draw_stream_rect(self) -> Optional[tuple[int, int, int, int]]:
+        """Screen rectangle covering the rates card and the private-rates card (the right half)."""
+        try:
+            if self.root.state() == "iconic" or self.notebook.select() != str(self.main_tab):
+                return None
+            left_card, right_card = self.rate_card, self.private_card
+            x = left_card.winfo_rootx()
+            y = min(left_card.winfo_rooty(), right_card.winfo_rooty())
+            right = right_card.winfo_rootx() + right_card.winfo_width()
+            bottom = max(left_card.winfo_rooty() + left_card.winfo_height(), right_card.winfo_rooty() + right_card.winfo_height())
+        except tk.TclError:
+            return None
+        return (x, y, right - x, bottom - y)
+
+    def _tick_draw_stream(self) -> None:
+        self._draw_stream_after_id = None
+        try:
+            self.draw_stream.tick(self.draw_stream_rect())
+        except Exception:
+            logging.getLogger(__name__).exception("Draw stream check failed")
+        try:
+            self._draw_stream_after_id = self.root.after(2000, self._tick_draw_stream)
+        except tk.TclError:
+            pass
+
+    def _test_draw_stream(self) -> None:
+        self.notebook.select(self.main_tab)
+        self.draw_stream.open_test(datetime.now(CAMBODIA_TIMEZONE) + timedelta(seconds=60))
+
     def _on_root_destroy(self, event) -> None:
         if event.widget is not self.root:
             return
         for attribute in (
             "_rate_pulse_after_id", "_rate_group_start_after_id", "_rate_group_glow_after_id", "_ticker_after_id",
-            "_rate_fit_after_id",
+            "_rate_fit_after_id", "_draw_stream_after_id",
         ):
             after_id = getattr(self, attribute, None)
             if after_id is not None:
@@ -1736,6 +1772,11 @@ class Dashboard:
                 except tk.TclError:
                     pass
                 setattr(self, attribute, None)
+        if self.draw_stream is not None:
+            try:
+                self.draw_stream.close()
+            except Exception:
+                pass
 
     def _arrange_rate_group_controls(self, narrow: bool) -> None:
         """Share the title bar with the controls when wide; use a bottom footer when narrow."""
@@ -1976,6 +2017,8 @@ class Dashboard:
         self._label(card, "CONTROLS", size=10, color="muted", weight="bold").pack(anchor="w", padx=17, pady=(14, 10))
         self.mute_button = self._button(card, "SPEAKER ON", self._toggle_mute, accent="green_dark"); self.mute_button.pack(fill="x", padx=16, pady=5)
         self._button(card, "TEST SPEAKER", lambda: self.announce_test(SPEAKER_TEST)).pack(fill="x", padx=16, pady=5)
+        if self.draw_stream is not None:
+            self._button(card, "TEST DRAW STREAM (60 s)", self._test_draw_stream).pack(fill="x", padx=16, pady=5)
         self._button(card, "SETTINGS / DIAGNOSTICS", lambda: self.notebook.select(self.diagnostics_tab)).pack(fill="x", padx=16, pady=5)
         self.controls_setup_label = self._label(card, variable=self.values["setup"], size=9, color="muted", wraplength=250, justify="left")
         self.controls_setup_label.pack(fill="x", padx=17, pady=(12, 15))
