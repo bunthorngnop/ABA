@@ -14,7 +14,7 @@ def test_queue_is_sequential_and_survives_one_failure():
     speech = SometimesFails(); statuses = []
     audio = AudioQueue(speech, lambda item, status: statuses.append((item.text, status)))
     for value in "ABC": audio.enqueue(value)
-    audio._items.join(); audio.stop()
+    audio.join(); audio.stop()
     assert speech.spoken == ["A", "C"]
     assert statuses == [("A", "SPOKEN"), ("B", "FAILED"), ("C", "SPOKEN")]
 
@@ -25,7 +25,7 @@ def test_per_item_voice_override_leaves_default_provider_unchanged():
     audio = AudioQueue(default_speech)
     audio.enqueue("payment")
     audio.enqueue("scheduled time", provider=male_speech, purpose="scheduled_time")
-    audio._items.join()
+    audio.join()
     audio.stop()
 
     assert default_speech.spoken == ["payment"]
@@ -38,7 +38,7 @@ def test_mute_applies_to_scheduled_voice_override():
     audio = AudioQueue(FakeSpeech(), lambda item, status: statuses.append((item.purpose, status)))
     audio.set_muted(True)
     audio.enqueue("scheduled time", provider=male_speech, purpose="scheduled_time")
-    audio._items.join()
+    audio.join()
     audio.stop()
 
     assert male_speech.spoken == []
@@ -52,7 +52,7 @@ def test_system_alert_plays_even_when_muted():
     audio.set_muted(True)
     audio.enqueue("payment while muted")
     audio.enqueue("alert", provider=alert_speech, purpose="system_alert", ignore_mute=True)
-    audio._items.join()
+    audio.join()
     audio.stop()
 
     assert alert_speech.spoken == ["alert"]
@@ -65,11 +65,77 @@ def test_expired_item_is_skipped_never_played_late():
     statuses = []
     audio = AudioQueue(speech, lambda item, status: statuses.append((item.text, status)), clock=lambda: now["t"])
     audio.enqueue("on time", expires_at=160.0)
-    audio._items.join()
+    audio.join()
     now["t"] = 161.0
     audio.enqueue("too late", expires_at=160.0)
-    audio._items.join()
+    audio.join()
     audio.stop()
 
     assert speech.spoken == ["on time"]
     assert statuses == [("on time", "SPOKEN"), ("too late", "SKIPPED")]
+
+
+# --- 2026-11-18: time announcements come first and interrupt a payment ---------------------------
+
+import threading as _threading  # noqa: E402
+
+from app import tts as _tts  # noqa: E402
+from app.tts import PlaybackInterrupted as _Interrupted  # noqa: E402
+
+
+class _InterruptibleSpeech:
+    """Fake speech: a payment "plays" until a time announcement interrupts it (like pygame)."""
+
+    def __init__(self):
+        self.started = []
+        self.finished = []
+        self.payment_playing = _threading.Event()
+        self.first_payment = True
+
+    def speak(self, text):
+        self.started.append(text)
+        if text.startswith("payment") and self.first_payment:
+            self.first_payment = False
+            self.payment_playing.set()
+            for _ in range(200):  # up to 2 s
+                if _tts.PLAYBACK_INTERRUPT.is_set():
+                    raise _Interrupted()
+                _threading.Event().wait(0.01)
+        self.finished.append(text)
+
+
+def test_time_announcement_interrupts_a_payment_which_is_then_replayed():
+    speech = _InterruptibleSpeech()
+    statuses = []
+    audio = AudioQueue(speech, lambda item, status: statuses.append((item.text, status)))
+    audio.enqueue("payment 1", "event-1")
+    audio.enqueue("payment 2", "event-2")
+    assert speech.payment_playing.wait(2)
+    audio.enqueue("time 16:27", purpose="scheduled_time")
+    assert audio.join(5)
+    audio.stop()
+    # The time cut in, then payment 1 was replayed from the start, then payment 2.
+    assert speech.started == ["payment 1", "time 16:27", "payment 1", "payment 2"]
+    assert speech.finished == ["time 16:27", "payment 1", "payment 2"]
+    assert statuses == [("time 16:27", "SPOKEN"), ("payment 1", "SPOKEN"), ("payment 2", "SPOKEN")]
+
+
+def test_waiting_time_announcement_jumps_ahead_of_waiting_payments():
+    gate = _threading.Event()
+    spoken = []
+
+    class Slow:
+        def speak(self, text):
+            if text == "first":
+                gate.wait(2)
+            spoken.append(text)
+
+    audio = AudioQueue(Slow())
+    audio.enqueue("first", purpose="scheduled_time")  # a time announcement is already playing
+    audio.enqueue("payment A", "a")
+    audio.enqueue("payment B", "b")
+    audio.enqueue("time 16:28", purpose="scheduled_time")
+    gate.set()
+    assert audio.join(5)
+    audio.stop()
+    assert spoken == ["first", "time 16:28", "payment A", "payment B"]

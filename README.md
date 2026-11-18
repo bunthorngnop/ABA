@@ -180,7 +180,13 @@ Scheduled announcements use the male Khmer voice `km-KH-PisethNeural`; payment a
 
 ### Hourly time announcements
 
-Every day, exactly on the hour from 08:00 to 22:00, the male voice says `នៅពេលនេះម៉ោង {hour} {period}` (no final `។`): ព្រឹក for 08:00–11:00, `១២ ថ្ងៃត្រង់` at 12:00, រសៀល for 13:00–17:00 (spoken as ១–៥), ល្ងាច at 18:00 (៦), and យប់ for 19:00–22:00 (៧–១០). These are in addition to the 16:10/18:10 (Thursday 16:05/18:05) announcements. If a payment announcement is speaking, the hourly announcement follows it; if it cannot start within 60 seconds of the hour it is skipped, never played late. Each hour is claimed once per day in SQLite, and mute is respected.
+Every day, exactly on the hour from 08:00 until 00:00 (midnight), the male voice says `នៅពេលនេះម៉ោង {hour} {period}` (no final `។`): ព្រឹក for 08:00–11:00, `១២ ថ្ងៃត្រង់` at 12:00, រសៀល for 13:00–17:00 (spoken as ១–៥), ល្ងាច at 18:00 (៦), យប់ for 19:00–23:00 (៧–១១), and `១២ អធ្រាត្រ` at 00:00. Each hour is claimed once per day in SQLite, and mute is respected.
+
+### Daily time announcements and priority
+
+In addition to 16:10 / 18:10 (Thursday 16:05 / 18:05), the male voice announces the time every day, 7 days a week, at 15:50, 15:55, 16:15, 16:20, 16:25, 16:27, 16:28, 16:29, 17:50, 17:55, 18:15, 18:20, 18:25, 18:27, 18:28 and 18:29, e.g. `ម៉ោង ៤ និង ២៧ នាទី រសៀល។` The day is said first only at Thursday 16:05 / 18:05 and at 15:55 / 17:55 on Tuesdays and Thursdays, e.g. `ថ្ងៃនេះជាថ្ងៃអង្គារ។ ឥឡូវ ម៉ោង ៣ និង ៥៥ នាទី រសៀល។`
+
+Time announcements (hourly and daily) come before payments: they jump ahead of waiting announcements and interrupt a payment announcement that is being spoken; the interrupted payment is then replayed from the beginning, so no payment is lost. As a safety net, a time announcement that still cannot start within 60 seconds of its time is skipped rather than spoken late.
 
 ### Payment-monitoring alert
 

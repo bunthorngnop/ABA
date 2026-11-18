@@ -197,7 +197,10 @@ def _run_application() -> int:
     )
     scheduled_announcements = ScheduledTimeAnnouncementService(
         store.claim_scheduled_announcement,
-        lambda text: audio.enqueue(text, provider=scheduled_voice, purpose="scheduled_time"),
+        lambda text: audio.enqueue(
+            text, provider=scheduled_voice, purpose="scheduled_time",
+            expires_at=time.monotonic() + HOURLY_LATE_LIMIT_SECONDS,
+        ),
         enqueue_hourly=lambda text: audio.enqueue(
             text, provider=scheduled_voice, purpose="scheduled_time",
             expires_at=time.monotonic() + HOURLY_LATE_LIMIT_SECONDS,

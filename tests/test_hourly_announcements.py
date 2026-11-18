@@ -14,11 +14,13 @@ def at(hour, minute=0, second=0, day=4):
     return datetime(2026, 11, day, hour, minute, second, tzinfo=CAMBODIA_TIMEZONE)
 
 
-def test_hourly_slots_run_every_hour_from_8_to_22_only_at_the_exact_hour():
-    assert HOURLY_ANNOUNCEMENT_HOURS == tuple(range(8, 23))
-    assert [hourly_slot(at(hour)) for hour in (8, 12, 18, 22)] == ["08:00", "12:00", "18:00", "22:00"]
+def test_hourly_slots_run_every_hour_from_8_until_midnight_only_at_the_exact_hour():
+    assert HOURLY_ANNOUNCEMENT_HOURS == (*range(8, 24), 0)
+    assert [hourly_slot(at(hour)) for hour in (8, 12, 18, 22, 23, 0)] == [
+        "08:00", "12:00", "18:00", "22:00", "23:00", "00:00",
+    ]
     assert hourly_slot(at(7)) is None
-    assert hourly_slot(at(23)) is None
+    assert hourly_slot(at(1)) is None
     assert hourly_slot(at(8, 0, 1)) is None
     assert hourly_slot(at(8, 1)) is None
 
@@ -65,3 +67,8 @@ def test_missed_hour_is_not_announced_later():
     assert not service.check_once(at(9, 0, 5))
     assert not service.check_once(at(9, 3))
     assert hourly == []
+
+
+def test_late_evening_and_midnight_wording():
+    assert hourly_announcement_text(23) == "នៅពេលនេះម៉ោង ១១ យប់"
+    assert hourly_announcement_text(0) == "នៅពេលនេះម៉ោង ១២ អធ្រាត្រ"
