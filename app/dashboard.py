@@ -1730,18 +1730,16 @@ class Dashboard:
             return
 
     def draw_stream_rect(self) -> Optional[tuple[int, int, int, int]]:
-        """Screen rectangle covering the rates card and the private-rates card (the right half)."""
+        """Screen rectangle of the right half of the whole ABA window, top to bottom (owner, 2026-11-21)."""
         try:
             if self.root.state() == "iconic" or self.notebook.select() != str(self.main_tab):
                 return None
-            left_card, right_card = self.rate_card, self.private_card
-            x = left_card.winfo_rootx()
-            y = min(left_card.winfo_rooty(), right_card.winfo_rooty())
-            right = right_card.winfo_rootx() + right_card.winfo_width()
-            bottom = max(left_card.winfo_rooty() + left_card.winfo_height(), right_card.winfo_rooty() + right_card.winfo_height())
+            left, top = self.root.winfo_rootx(), self.root.winfo_rooty()
+            width, height = self.root.winfo_width(), self.root.winfo_height()
         except tk.TclError:
             return None
-        return (x, y, right - x, bottom - y)
+        half = width // 2
+        return (left + half, top, width - half, height)
 
     def _tick_draw_stream(self) -> None:
         self._draw_stream_after_id = None

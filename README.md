@@ -194,7 +194,7 @@ Every fixed time sentence (41 in total: the hourly sentences 08:00–00:00, the 
 
 ### Lottery draw stream
 
-Every day from 16:05 to 16:40 and from 18:05 to 18:40, ABA opens `https://www.youtube.com/@xosominhngoc/live` (Xổ Số Minh Ngọc) in Microsoft Edge app mode with its own profile (`%LOCALAPPDATA%\ABA Payment Speaker\draw_stream_edge\`), with sound and autoplay, and keeps that window docked exactly over the rates card and the private-rates card (on top, compensating Windows' invisible borders). It closes it at the end of the window and when ABA exits. Each window opens once per day; if someone closes the stream it is not reopened until the next window. Edge is a separate program, so a browser problem cannot stop payment announcements. Operations → CONTROLS has **TEST DRAW STREAM (60 s)**.
+Every day from 16:05 to 16:40 and from 18:05 to 18:40, ABA opens `https://www.youtube.com/@xosominhngoc/live` (Xổ Số Minh Ngọc) in Microsoft Edge app mode with its own profile (`%LOCALAPPDATA%\ABA Payment Speaker\draw_stream_edge\`), with sound and autoplay, and keeps that window docked over the right half of the whole ABA window, top to bottom (on top, compensating Windows' invisible borders). It closes it at the end of the window and when ABA exits. Each window opens once per day; if someone closes the stream it is not reopened until the next window. Edge is a separate program, so a browser problem cannot stop payment announcements. Operations → CONTROLS has **TEST DRAW STREAM (60 s)**.
 
 ### Payment-monitoring alert
 

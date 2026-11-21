@@ -802,3 +802,19 @@ def test_brand_card_matches_nbc_card_with_coin_name_and_tagline():
             assert canvas.winfo_rootx() + canvas.winfo_width() <= clock_left  # never covers the clock
     finally:
         dashboard.root.destroy()
+
+
+def test_draw_stream_covers_the_right_half_of_the_whole_window():
+    dashboard = _make_dashboard(initial_exchange_rates=_rates())
+    try:
+        for geometry in ("900x600", "1382x744"):
+            _layout(dashboard, geometry)
+            x, y, width, height = dashboard.draw_stream_rect()
+            root_x, root_y = dashboard.root.winfo_rootx(), dashboard.root.winfo_rooty()
+            root_width, root_height = dashboard.root.winfo_width(), dashboard.root.winfo_height()
+            assert (y, height) == (root_y, root_height)  # top to bottom
+            assert x == root_x + root_width // 2 and x + width == root_x + root_width  # right half
+        dashboard.notebook.select(dashboard.diagnostics_tab)
+        assert dashboard.draw_stream_rect() is None  # never repositioned over the Settings tab
+    finally:
+        dashboard.root.destroy()
