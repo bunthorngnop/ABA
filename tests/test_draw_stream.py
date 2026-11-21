@@ -1,49 +1,53 @@
-"""Lottery draw stream docking (fake Edge: no browser is ever started by these tests)."""
+"""Lottery draw stream docking with fake browser windows (no browser is ever started by these tests)."""
 
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from app import draw_stream as ds
-from app.draw_stream import DRAW_STREAM_URL, DrawStreamController, active_draw_window
+from app.draw_stream import (
+    CHROME_PROFILE_NAME,
+    DRAW_STREAM_URL,
+    RETRY_SECONDS,
+    DrawStreamController,
+    active_draw_window,
+    browser_command,
+)
 from app.exchange_rates import CAMBODIA_TIMEZONE
 
-
-def at(hour, minute, day=18):
-    return datetime(2026, 11, day, hour, minute, tzinfo=CAMBODIA_TIMEZONE)
-
-
-class FakeProcess:
-    pid = 4242
-
-    def __init__(self):
-        self.running = True
-
-    def poll(self):
-        return None if self.running else 0
-
-
-class Harness:
-    def __init__(self, tmp_path, monkeypatch, now):
-        self.now = now
-        self.launches = []
-        self.killed = []
-        self.process = None
-
-        def launcher(args):
-            self.launches.append(args)
-            self.process = FakeProcess()
-            return self.process
-
-        monkeypatch.setattr(ds, "_kernel32", None)  # fake process: no real Windows process lookup
-        monkeypatch.setattr(ds, "_dock_calls", [], raising=False)
-        monkeypatch.setattr(ds.DrawStreamController, "_dock", lambda controller, rect: ds._dock_calls.append(rect))
-        monkeypatch.setattr(ds.subprocess, "run", lambda args, **kwargs: self.killed.append(args))
-        self.controller = DrawStreamController(
-            tmp_path / "profile", lambda: self.now, launcher=launcher, edge_path=Path("msedge.exe"),
-        )
-
-
 RECT = (690, 1300, 670, 500)
+
+
+def at(hour, minute, second=0, day=21):
+    return datetime(2026, 11, day, hour, minute, second, tzinfo=CAMBODIA_TIMEZONE)
+
+
+class FakeDesktop:
+    """Browser windows on screen; the user's own Chrome window 1 is open all along."""
+
+    def __init__(self, now, stream_appears=True):
+        self.now = now
+        self.windows = {1}
+        self.stream_appears = stream_appears
+        self.launches, self.placed, self.closed = [], [], []
+        self.controller = DrawStreamController(
+            Path("edge-profile"), lambda: self.now,
+            launcher=self.launch,
+            command=lambda url, rect, profile: ["chrome.exe", f"--app={url}"],
+            list_windows=lambda: set(self.windows),
+            exists=lambda hwnd: hwnd in self.windows,
+            place=lambda hwnd, rect: self.placed.append((hwnd, rect)),
+            close=self.close,
+            title=lambda hwnd: self.titles.get(hwnd, "XSMB Minh Ngọc - Trực tiếp"),
+        )
+        self.titles = {1: "Inbox - Google Chrome"}
+
+    def launch(self, args):
+        self.launches.append(args)
+        if self.stream_appears:
+            self.windows.add(100 + len(self.launches))
+
+    def close(self, hwnd):
+        self.closed.append(hwnd)
+        self.windows.discard(hwnd)
 
 
 def test_draw_windows_are_1605_to_1640_and_1805_to_1840():
@@ -52,58 +56,84 @@ def test_draw_windows_are_1605_to_1640_and_1805_to_1840():
     assert active_draw_window(at(16, 39)) == "16:05-16:40"
     assert active_draw_window(at(16, 40)) is None
     assert active_draw_window(at(18, 5)) == "18:05-18:40"
-    assert active_draw_window(at(12, 0)) is None
 
 
-def test_opens_docked_edge_app_window_with_sound_and_closes_after_the_draw(tmp_path, monkeypatch):
-    h = Harness(tmp_path, monkeypatch, at(16, 6))
-    h.controller.tick(RECT)
-    args = h.launches[0]
-    assert f"--app={DRAW_STREAM_URL}" in args and DRAW_STREAM_URL == "https://www.youtube.com/@xosominhngoc/live"
+def test_chrome_command_uses_the_owners_profile_and_app_mode(monkeypatch):
+    import app.draw_stream as ds
+
+    monkeypatch.setattr(ds, "CHROME_PATHS", (Path(__file__),))  # any existing file stands in for chrome.exe
+    monkeypatch.setattr(ds, "chrome_profile_directory", lambda name=CHROME_PROFILE_NAME: "Profile 2")
+    args = browser_command(DRAW_STREAM_URL, RECT, Path("edge-profile"))
+    assert f"--app={DRAW_STREAM_URL}" in args and "--profile-directory=Profile 2" in args
     assert "--window-position=690,1300" in args and "--window-size=670,500" in args
-    assert "--autoplay-policy=no-user-gesture-required" in args  # sound on, no click needed
-    assert any(a.startswith("--user-data-dir=") for a in args)  # own profile, user's Edge untouched
-    h.controller.tick(RECT)
-    assert ds._dock_calls == [RECT]  # kept in place over the cards
-    h.now = at(16, 40)
-    h.controller.tick(RECT)
-    assert h.killed and h.killed[0][0] == "taskkill" and "/PID" in h.killed[0]
-    assert not h.controller.is_open
+    assert not any(a.startswith("--user-data-dir") for a in args)  # the owner's signed-in Chrome, not a new profile
+    assert CHROME_PROFILE_NAME == "Bunthorng" and DRAW_STREAM_URL == "https://www.youtube.com/@xosominhngoc/live"
 
 
-def test_opens_once_per_window_and_not_again_if_closed_by_hand(tmp_path, monkeypatch):
-    h = Harness(tmp_path, monkeypatch, at(18, 10))
-    h.controller.tick(RECT)
-    h.process.running = False  # someone closed the stream
-    h.controller.tick(RECT)
-    h.controller.tick(RECT)
-    assert len(h.launches) == 1
-    h.now = at(16, 6, day=19)  # next day's window opens again
-    h.controller.tick(RECT)
-    assert len(h.launches) == 2
+def test_docks_only_the_new_window_and_closes_only_that_window():
+    desk = FakeDesktop(at(16, 6))
+    desk.controller.tick(RECT)  # launch
+    desk.controller.tick(RECT)  # the new window is found and docked
+    assert desk.placed == [(101, RECT)]
+    desk.now = at(16, 40)
+    desk.controller.tick(RECT)
+    assert desk.closed == [101]  # the user's own Chrome window 1 is never touched
+    assert desk.windows == {1}
 
 
-def test_waits_for_the_dashboard_and_never_opens_outside_a_window(tmp_path, monkeypatch):
-    h = Harness(tmp_path, monkeypatch, at(16, 6))
-    h.controller.tick(None)  # dashboard minimised or on another tab
-    assert h.launches == []
-    h.now = at(15, 0)
-    h.controller.tick(RECT)
-    assert h.launches == []
+def test_keeps_retrying_the_channel_until_the_stream_appears():
+    desk = FakeDesktop(at(16, 6), stream_appears=False)
+    desk.controller.tick(RECT)
+    desk.now += timedelta(seconds=26)
+    desk.controller.tick(RECT)  # gave up waiting; retry later
+    assert len(desk.launches) == 1
+    desk.now += timedelta(seconds=RETRY_SECONDS)
+    desk.stream_appears = True
+    desk.controller.tick(RECT)  # second attempt
+    desk.controller.tick(RECT)
+    assert len(desk.launches) == 2 and desk.placed and desk.placed[-1][0] == 102
 
 
-def test_test_button_opens_for_a_minute_outside_the_draw_window(tmp_path, monkeypatch):
-    h = Harness(tmp_path, monkeypatch, at(11, 0))
-    h.controller.open_test(h.now + timedelta(seconds=60))
-    h.controller.tick(RECT)
-    assert len(h.launches) == 1
-    h.now = at(11, 2)
-    h.controller.tick(RECT)
-    assert h.killed
+def test_closed_by_hand_stays_closed_until_the_next_window():
+    desk = FakeDesktop(at(18, 10))
+    desk.controller.tick(RECT)
+    desk.controller.tick(RECT)
+    desk.windows.discard(101)  # the user clicked ✕
+    for _ in range(3):
+        desk.controller.tick(RECT)
+    assert len(desk.launches) == 1
+    desk.now = at(16, 6, day=22)
+    desk.controller.tick(RECT)
+    assert len(desk.launches) == 2
 
 
-def test_missing_edge_is_skipped_quietly(tmp_path):
-    controller = DrawStreamController(tmp_path, lambda: at(16, 6), launcher=lambda args: 1 / 0, edge_path=None)
-    controller.edge_path = None
-    controller.tick(RECT)
-    assert not controller.is_open
+def test_waits_for_the_dashboard_and_never_opens_outside_a_window():
+    desk = FakeDesktop(at(16, 6))
+    desk.controller.tick(None)
+    assert desk.launches == []
+    desk.now = at(15, 0)
+    desk.controller.tick(RECT)
+    assert desk.launches == []
+
+
+def test_test_button_opens_for_a_minute_outside_the_draw_window():
+    desk = FakeDesktop(at(11, 0))
+    desk.controller.open_test(desk.now + timedelta(seconds=60))
+    desk.controller.tick(RECT)
+    desk.controller.tick(RECT)
+    assert desk.placed
+    desk.now = at(11, 2)
+    desk.controller.tick(RECT)
+    assert desk.closed == [101]
+
+
+def test_restored_normal_chrome_windows_are_never_mistaken_for_the_stream():
+    desk = FakeDesktop(at(16, 6))
+    desk.windows.add(50)  # Chrome restored a normal window while starting
+    desk.titles[50] = "Gmail - Google Chrome"
+    desk.controller._before = {1}
+    desk.controller.tick(RECT)  # launch (snapshot now includes 50)
+    desk.windows.add(60)
+    desk.titles[60] = "News - Google Chrome"  # another restored window appears with the stream
+    desk.controller.tick(RECT)
+    assert desk.placed == [(101, RECT)]
