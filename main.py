@@ -85,6 +85,9 @@ def main() -> int:
         pass
     try:
         return _run_application()
+    except BaseException:
+        logging.getLogger(__name__).exception("ABA could not start or stopped unexpectedly")
+        raise
     finally:
         instance_lock.release()
 
@@ -159,6 +162,10 @@ def _run_application() -> int:
         integration_status.update("speaker", "Ready" if status == "SPOKEN" else status)
 
     audio = AudioQueue(EdgeKhmerSpeech(settings.tts_voice, settings.tts_volume), audio_status)
+    # Created before the dashboard, which needs it (a wrong order stopped ABA at startup on 2026-11-21).
+    draw_stream = DrawStreamController(
+        settings.database_path.parent / "draw_stream_edge", lambda: datetime.now(CAMBODIA_TIMEZONE),
+    )
     dashboard = Dashboard(
         lambda text: audio.enqueue(text),
         audio.set_muted,
@@ -199,9 +206,6 @@ def _run_application() -> int:
         missing = len(scheduled_voice.missing(all_fixed_time_texts()))
         logging.getLogger(__name__).info("Time voice recordings: %s new, %s still missing", recorded, missing)
 
-    draw_stream = DrawStreamController(
-        runtime_dir / "draw_stream_edge", lambda: datetime.now(CAMBODIA_TIMEZONE),
-    )
 
     def play_system_alert(kind: str) -> None:
         # Pre-recorded files play without internet; fall back to live TTS if a file is missing.
