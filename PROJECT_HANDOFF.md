@@ -203,6 +203,18 @@ Recent announced payments:
 - history refreshes after successful speech and resets on a new local day;
 - rejected, muted, failed, duplicate, and test payments are excluded.
 
+Lottery draw stream (`app/draw_stream.py`): during each draw window ABA opens the channel's `/live` page in Google Chrome app mode with the owner's profile "Bunthorng" (Edge with ABA's own profile only if Chrome is missing). The window is docked over the right half of the whole ABA window, top to bottom, kept on top, and closed at the end of the window or when ABA exits. Only ABA's own window is closed; the owner's other Chrome windows are never touched. Windows, every day (Cambodia time):
+
+| Draw | Channel | Window |
+|---|---|---|
+| 10:00 | Cambodian ផ្ទះ ឆ្នោតយួន (`/channel/UC1SVFPlK1ljQk-jdHgXB6qA/live`) | 10:15–10:45 |
+| 13:00 | Cambodian | 13:15–13:45 |
+| 16:00 | Vietnamese Xổ Số Minh Ngọc (`/@xosominhngoc/live`) | 16:05–16:40 |
+| 18:00 | Vietnamese | 18:05–18:40 |
+| 19:00 | Cambodian | 19:15–19:45 |
+
+Full results are at half past the hour, about 5 minutes earlier on Tuesdays and Thursdays; one window per draw covers both. For the Cambodian channel, ABA reopens the page every 60 s while the window title is not that hour's live video (its titles use 12-hour times such as "ម៉ោង 07:30"). If no window appears, ABA retries every 30 s. A stream closed by hand stays closed until the next draw window. Volume is set by the owner in the YouTube player (20%), not by ABA. Operations → CONTROLS → **TEST DRAW STREAM (60 s)** opens the Vietnamese channel.
+
 Settings, Telegram commissioning, IDs, and safe parser tests remain on the secondary Settings & Diagnostics tab. System health, TODAY totals, and Dashboard controls are available together in its Operations subtab.
 
 ## Database and history
@@ -373,6 +385,18 @@ This mechanism applies when Codex is actively working in this repository. It can
 - Future relay/viewer work still depends on a separately approved and implemented v2 loopback source contract with immutable ordered updates, epoch/reset signaling, and a content-free bootstrap/high-water barrier. Do not proceed to Stage 2 without owner approval.
 
 ## Conversation and Decision Log
+
+### 2026-11-22 — Lottery channel schedule check; scope kept to 16:00 and 18:00
+
+- Read-only check of the Xổ Số Minh Ngọc channel's public feed (latest 15 videos, Fri 20 and Sat 21 Nov only). Observed live broadcasts (Cambodia time): all regions 15:45–21:00, South from 16:00 (draw about 16:15–16:35), Central 17:00–18:30 (draw about 17:15–17:35), North from 17:50 (draw about 18:15–18:35). No 10:00, 13:00 or 19:00 broadcasts were found. The owner's note that Tue/Thu draws run about 5 minutes earlier could not be verified from this sample, but the current windows start early enough either way.
+- Owner decision: ignore the other hours and keep only the 16:00 and 18:00 draws. The draw windows stay 16:05–16:40 and 18:05–18:40; no Central window is added.
+- Stream volume: owner chose (a). The owner sets the YouTube player slider to 20% once during a stream in the Bunthorng Chrome profile, and YouTube remembers it. No code change.
+- Owner then found a second channel for the other hours: `@ផ្ទះ_ឆ្នោតយួន` (channel ID `UC1SVFPlK1ljQk-jdHgXB6qA`, small channel of about 512 subscribers). A read-only check of its feed (Sat 21 and Sun 22 Nov) shows one live result stream per hour, with the draw at :30 past each hour from 08:30 to 20:30. Titles use 12-hour times without AM/PM. Streams go live about 20–40 minutes before the draw and end about 10–20 minutes after it. Examples: 10:30 draw live 10:09–10:59; 16:30 draw live 15:48–17:19; 18:30 draw live 17:48–18:59; 19:30 draw live 19:18–19:49. Each video is a separate live, so a channel `/live` link points at whichever stream is current. Tue/Thu timing is still unverified.
+- Owner decision (clarified): two channels. The Vietnamese channel (Xổ Số Minh Ngọc) is used only for the 16:00 and 18:00 draws. The Cambodian channel (ផ្ទះ ឆ្នោតយួន) is used for the other hours the owner named: 10:00, 13:00 and 19:00. Full results are at half past the hour, about 5 minutes earlier on Tuesdays and Thursdays.
+- Owner approved "approved, implement and deploy" for: Cambodian windows 10:15–10:45, 13:15–13:45 and 19:15–19:45 every day; Minh Ngọc 16:05–16:40 and 18:05–18:40 unchanged; reopen the Cambodian page every 60 s while its title is not that hour's live video, because that channel's live can start late (for example 10:09 or 19:18).
+- Implemented in `app/draw_stream.py`: `DrawWindow` (start, end, url, draw hour, reload flag), `CAMBODIAN_STREAM_URL`, `draw_window_at`, `shows_live_draw` (12-hour hour in the title; channel home page rejected), `LIVE_RELOAD_SECONDS = 60`; the controller opens each window's channel and closes a window of a different channel. Tests added in `tests/test_draw_stream.py` (two-channel schedule, Tue/Thu coverage, title check, reload until live, Vietnamese never reloaded). README and the dashboard section of this handoff updated.
+- Tests: workspace 313 passed; production 284 passed. Sandbox start (no credentials, scratch data, outside any draw window) returned 0.
+- Deployment: production files matched the previous commit; 2 files copied and SHA-256 verified. The watchdog task was disabled, but the running ABA (started 13:08 with higher privileges than this session) ignored the close request, so nothing was interrupted and the task was re-enabled right away. A backup created inside `C:\ABA Payment Speaker\backups` was collected by pytest and was moved to the session scratch folder; keep deploy backups outside the production tree. The new code takes effect at ABA's next start. Operational action: the owner closes ABA with its ✕ once; the watchdog restarts it within a minute on the new code.
 
 ### 2026-11-18 — Lottery draw stream docked over the dashboard; recorded time voice
 

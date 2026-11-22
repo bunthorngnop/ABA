@@ -9,22 +9,54 @@ The owner's Chrome may already be open, so ABA never shuts Chrome down: it recog
 window it opened (the browser windows present just before launching are remembered) and closes
 that window alone, exactly like clicking its ✕. If the stream does not come up, ABA keeps trying
 the same channel every 30 seconds until the draw window ends. If Chrome is not installed, Edge is
-used instead. Only DRAW_STREAM_URL is ever opened.
+used instead. Only DRAW_STREAM_URL and CAMBODIAN_STREAM_URL are ever opened.
+
+Two channels (owner decision 2026-11-22): the Vietnamese channel Xổ Số Minh Ngọc for the 16:00 and
+18:00 draws, and the Cambodian channel ផ្ទះ ឆ្នោតយួន for the 10:00, 13:00 and 19:00 draws. Full
+results are at half past the hour (about 5 minutes earlier on Tuesdays and Thursdays), so one window
+from :15 to :45 covers every day. The Cambodian channel sometimes goes live late; while its page is
+not showing that hour's live video, ABA reopens it every minute.
 """
 
 import ctypes
 import logging
+import re
 import subprocess
 from ctypes import wintypes
+from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
-DRAW_STREAM_URL = "https://www.youtube.com/@xosominhngoc/live"
-# (start, end) in Cambodia time, every day.
-DRAW_WINDOWS = ((time(16, 5), time(16, 40)), (time(18, 5), time(18, 40)))
+DRAW_STREAM_URL = "https://www.youtube.com/@xosominhngoc/live"  # Vietnamese channel Xổ Số Minh Ngọc
+# Cambodian channel ផ្ទះ ឆ្នោតយួន (@ផ្ទះ_ឆ្នោតយួន), addressed by its channel ID to keep the URL plain ASCII.
+CAMBODIAN_STREAM_URL = "https://www.youtube.com/channel/UC1SVFPlK1ljQk-jdHgXB6qA/live"
+
+
+@dataclass(frozen=True)
+class DrawWindow:
+    start: time
+    end: time
+    url: str
+    draw_hour: int  # hour of the draw (results at about :30)
+    reload_until_live: bool = False  # channel whose live can start late: reopen until it shows
+
+    @property
+    def label(self) -> str:
+        return f"{self.start:%H:%M}-{self.end:%H:%M}"
+
+
+# Cambodia time, every day.
+DRAW_WINDOWS = (
+    DrawWindow(time(10, 15), time(10, 45), CAMBODIAN_STREAM_URL, 10, True),
+    DrawWindow(time(13, 15), time(13, 45), CAMBODIAN_STREAM_URL, 13, True),
+    DrawWindow(time(16, 5), time(16, 40), DRAW_STREAM_URL, 16),
+    DrawWindow(time(18, 5), time(18, 40), DRAW_STREAM_URL, 18),
+    DrawWindow(time(19, 15), time(19, 45), CAMBODIAN_STREAM_URL, 19, True),
+)
+LIVE_RELOAD_SECONDS = 60  # how often to reopen a page that is not showing the live video yet
 CHROME_PROFILE_NAME = "Bunthorng"  # the owner's Chrome profile with YouTube Premium
 CHROME_PATHS = (
     Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
@@ -41,13 +73,36 @@ BROWSER_WINDOW_CLASS = "Chrome_WidgetWin_1"  # top-level class used by both Chro
 Rect = tuple[int, int, int, int]  # x, y, width, height in screen pixels
 
 
+def draw_window_at(now: datetime) -> Optional[DrawWindow]:
+    """The draw window containing `now`, or None."""
+    current = now.time()
+    for window in DRAW_WINDOWS:
+        if window.start <= current < window.end:
+            return window
+    return None
+
+
 def active_draw_window(now: datetime) -> Optional[str]:
     """The draw window containing `now` as "HH:MM-HH:MM", or None."""
-    current = now.time()
-    for start, end in DRAW_WINDOWS:
-        if start <= current < end:
-            return f"{start:%H:%M}-{end:%H:%M}"
-    return None
+    window = draw_window_at(now)
+    return window.label if window else None
+
+
+_HOUR_IN_TITLE = re.compile(r"ម៉ោង\s*(\d{1,2})\s*[:.]\s*\d{2}")
+
+
+def shows_live_draw(title: str, draw_hour: int) -> bool:
+    """Whether the Cambodian channel's page title is that hour's live result video.
+
+    Its videos are titled like "🔴LIVE ! លទ្ធផលឆ្នោតយួន | ម៉ោង 07:30 នាទី | ..." with a 12-hour time;
+    the channel home page (shown when nothing is live) is titled with the channel name only.
+    """
+    if "LIVE" not in title.upper() and "លទ្ធផល" not in title:
+        return False
+    match = _HOUR_IN_TITLE.search(title)
+    if match is None:
+        return True  # a live video without an hour in its title: accept it
+    return int(match.group(1)) % 12 == draw_hour % 12
 
 
 def chrome_profile_directory(profile_name: str = CHROME_PROFILE_NAME) -> Optional[str]:
@@ -180,6 +235,8 @@ class DrawStreamController:
         self._retry_at: Optional[datetime] = None
         self._shown_windows: set[str] = set()  # "YYYY-MM-DD HH:MM-HH:MM" in which the stream appeared
         self._test_until: Optional[datetime] = None
+        self._url: Optional[str] = None  # channel of the open (or launching) stream window
+        self._docked_at: Optional[datetime] = None
 
     @property
     def is_open(self) -> bool:
@@ -192,7 +249,8 @@ class DrawStreamController:
 
     def tick(self, rect: Optional[Rect]) -> None:
         now = self.clock()
-        window = active_draw_window(now)
+        draw = draw_window_at(now)
+        window = draw.label if draw else None
         testing = self._test_until is not None and now < self._test_until
         if self._test_until is not None and not testing:
             self._test_until = None
@@ -202,11 +260,24 @@ class DrawStreamController:
             self.close()
             self._retry_at = None
             return
+        url = draw.url if draw else DRAW_STREAM_URL
+        if self._url is not None and self._url != url and (self._hwnd is not None or self._launched_at is not None):
+            self.close()  # a different channel's window is due now
+            self._retry_at = None
         if rect is None or rect[2] < 200 or rect[3] < 150:
             return  # dashboard not laid out, minimised or on another tab; try again next tick
         key = f"{now:%Y-%m-%d} {window or 'test'}"
         if self._hwnd is not None:
             if self.exists(self._hwnd):
+                if (draw is not None and draw.reload_until_live and self._docked_at is not None
+                        and now - self._docked_at >= timedelta(seconds=LIVE_RELOAD_SECONDS)
+                        and not shows_live_draw(self.title(self._hwnd), draw.draw_hour)):
+                    # The channel is not live with this draw yet: reopen its live page.
+                    logger.info("Draw stream not live yet; reopening the channel")
+                    self.close()
+                    self._shown_windows.discard(key)
+                    self._retry_at = None
+                    return
                 self.place(self._hwnd, rect)
                 return
             # The stream window was closed by hand: leave it closed until the next draw window.
@@ -220,6 +291,7 @@ class DrawStreamController:
             if apps:
                 self._hwnd = apps[-1]
                 self._launched_at = None
+                self._docked_at = now
                 self._shown_windows.add(key)
                 logger.info("Draw stream window found and docked")
                 self.place(self._hwnd, rect)
@@ -234,10 +306,11 @@ class DrawStreamController:
             return  # already shown in this draw window (and then closed by hand)
         if self._retry_at is not None and now < self._retry_at:
             return
-        self._launch(rect, now)
+        self._launch(rect, now, url)
 
-    def _launch(self, rect: Rect, now: datetime) -> None:
-        args = self.command(DRAW_STREAM_URL, rect, self.edge_profile_dir)
+    def _launch(self, rect: Rect, now: datetime, url: str = DRAW_STREAM_URL) -> None:
+        self._url = url
+        args = self.command(url, rect, self.edge_profile_dir)
         if args is None:
             logger.warning("Draw stream skipped: neither Chrome nor Edge was found")
             self._retry_at = now + timedelta(seconds=RETRY_SECONDS)
@@ -254,6 +327,7 @@ class DrawStreamController:
     def close(self) -> None:
         hwnd, self._hwnd = self._hwnd, None
         self._launched_at = None
+        self._docked_at = None
         if hwnd is not None and self.exists(hwnd):
             try:
                 self.close_one(hwnd)

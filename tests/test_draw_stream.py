@@ -4,12 +4,16 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from app.draw_stream import (
+    CAMBODIAN_STREAM_URL,
     CHROME_PROFILE_NAME,
     DRAW_STREAM_URL,
+    LIVE_RELOAD_SECONDS,
     RETRY_SECONDS,
     DrawStreamController,
     active_draw_window,
     browser_command,
+    draw_window_at,
+    shows_live_draw,
 )
 from app.exchange_rates import CAMBODIA_TIMEZONE
 
@@ -56,6 +60,73 @@ def test_draw_windows_are_1605_to_1640_and_1805_to_1840():
     assert active_draw_window(at(16, 39)) == "16:05-16:40"
     assert active_draw_window(at(16, 40)) is None
     assert active_draw_window(at(18, 5)) == "18:05-18:40"
+
+
+def test_vietnamese_channel_at_16_and_18_cambodian_channel_at_10_13_and_19():
+    """Owner decision 2026-11-22."""
+    expected = {
+        (10, 15): ("10:15-10:45", CAMBODIAN_STREAM_URL), (13, 15): ("13:15-13:45", CAMBODIAN_STREAM_URL),
+        (16, 5): ("16:05-16:40", DRAW_STREAM_URL), (18, 5): ("18:05-18:40", DRAW_STREAM_URL),
+        (19, 15): ("19:15-19:45", CAMBODIAN_STREAM_URL),
+    }
+    for (hour, minute), (label, url) in expected.items():
+        window = draw_window_at(at(hour, minute))
+        assert (window.label, window.url) == (label, url)
+    for hour, minute in ((10, 14), (10, 45), (13, 45), (17, 15), (19, 45), (8, 30), (20, 30)):
+        assert draw_window_at(at(hour, minute)) is None
+    assert CAMBODIAN_STREAM_URL == "https://www.youtube.com/channel/UC1SVFPlK1ljQk-jdHgXB6qA/live"
+
+
+def test_tuesday_and_thursday_results_five_minutes_early_are_inside_every_window():
+    for day in (24, 26):  # Tuesday 24 and Thursday 26 November 2026
+        assert at(10, 25, day=day).weekday() in (1, 3)
+        for hour in (10, 13, 16, 18, 19):
+            assert draw_window_at(at(hour, 25, day=day)) is not None  # results about 5 minutes early
+            assert draw_window_at(at(hour, 30, day=day)) is not None  # usual time
+
+
+def test_live_title_check_uses_the_12_hour_time_in_the_cambodian_titles():
+    title = "🔴LIVE ! លទ្ធផលឆ្នោតយួន | ម៉ោង 07:30 នាទី | ថ្ងៃទី 21/11/2026 | ផ្ទះ ឆ្នោតយួន - YouTube"
+    assert shows_live_draw(title, 19)
+    assert not shows_live_draw(title, 13)  # another hour's stream
+    assert shows_live_draw(title.replace("07:30", "01:25"), 13)  # Tue/Thu minutes may differ
+    assert shows_live_draw(title.replace("07:30", "10:30"), 10)
+    assert not shows_live_draw("ផ្ទះ ឆ្នោតយួន - YouTube", 10)  # channel home page: nothing live
+    assert not shows_live_draw("YouTube", 10)
+
+
+def test_cambodian_channel_is_reopened_every_minute_until_its_live_shows():
+    desk = FakeDesktop(at(19, 15))
+    desk.titles[101] = "ផ្ទះ ឆ្នោតយួន - YouTube"  # not live yet
+    desk.controller.tick(RECT)  # launch
+    assert f"--app={CAMBODIAN_STREAM_URL}" in desk.launches[0]
+    desk.controller.tick(RECT)  # docked
+    desk.now += timedelta(seconds=LIVE_RELOAD_SECONDS - 2)
+    desk.controller.tick(RECT)
+    assert desk.closed == []  # give the page a minute
+    desk.now += timedelta(seconds=2)
+    desk.controller.tick(RECT)
+    assert desk.closed == [101]  # reopened, not treated as closed by hand
+    desk.titles[102] = "🔴LIVE ! លទ្ធផលឆ្នោតយួន | ម៉ោង 07:30 នាទី | ផ្ទះ ឆ្នោតយួន - YouTube"
+    desk.controller.tick(RECT)  # relaunch
+    desk.controller.tick(RECT)  # docked
+    assert len(desk.launches) == 2 and desk.placed[-1][0] == 102
+    desk.now += timedelta(seconds=5 * LIVE_RELOAD_SECONDS)
+    desk.controller.tick(RECT)
+    assert desk.closed == [101]  # live now: left alone
+    desk.now = at(19, 45)
+    desk.controller.tick(RECT)
+    assert desk.closed == [101, 102]
+
+
+def test_vietnamese_channel_is_never_reopened_for_its_title():
+    desk = FakeDesktop(at(16, 6))
+    desk.controller.tick(RECT)
+    desk.controller.tick(RECT)
+    desk.now += timedelta(seconds=10 * LIVE_RELOAD_SECONDS)
+    desk.controller.tick(RECT)
+    assert desk.closed == [] and len(desk.launches) == 1
+    assert f"--app={DRAW_STREAM_URL}" in desk.launches[0]
 
 
 def test_chrome_command_uses_the_owners_profile_and_app_mode(monkeypatch):

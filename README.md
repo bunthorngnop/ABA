@@ -194,7 +194,17 @@ Every fixed time sentence (41 in total: the hourly sentences 08:00–00:00, the 
 
 ### Lottery draw stream
 
-Every day from 16:05 to 16:40 and from 18:05 to 18:40, ABA opens `https://www.youtube.com/@xosominhngoc/live` (Xổ Số Minh Ngọc) in Microsoft Edge app mode with its own profile (`%LOCALAPPDATA%\ABA Payment Speaker\draw_stream_edge\`), with sound and autoplay, and keeps that window docked over the right half of the whole ABA window, top to bottom (on top, compensating Windows' invisible borders). It closes it at the end of the window and when ABA exits. Each window opens once per day; if someone closes the stream it is not reopened until the next window. Edge is a separate program, so a browser problem cannot stop payment announcements. Operations → CONTROLS has **TEST DRAW STREAM (60 s)**.
+Every day ABA opens the lottery draw live stream in Google Chrome app mode with the owner's Chrome profile "Bunthorng" (YouTube Premium; Edge with ABA's own profile `%LOCALAPPDATA%\ABA Payment Speaker\draw_stream_edge\` only if Chrome is missing):
+
+| Draw | Channel | Shown |
+|---|---|---|
+| 10:00 | ផ្ទះ ឆ្នោតយួន (Cambodian) `https://www.youtube.com/channel/UC1SVFPlK1ljQk-jdHgXB6qA/live` | 10:15–10:45 |
+| 13:00 | ផ្ទះ ឆ្នោតយួន | 13:15–13:45 |
+| 16:00 | Xổ Số Minh Ngọc (Vietnamese) `https://www.youtube.com/@xosominhngoc/live` | 16:05–16:40 |
+| 18:00 | Xổ Số Minh Ngọc | 18:05–18:40 |
+| 19:00 | ផ្ទះ ឆ្នោតយួន | 19:15–19:45 |
+
+Results come at half past the hour, about 5 minutes earlier on Tuesdays and Thursdays; the windows cover both. The stream window is docked over the right half of the whole ABA window, top to bottom, kept on top (compensating Windows' invisible borders), and closed at the end of the window and when ABA exits. ABA closes only its own window, never the owner's other Chrome windows. The Cambodian channel can go live late, so ABA reopens its page every minute until the window shows that hour's live video. If someone closes the stream it is not reopened until the next window. The browser is a separate program, so a browser problem cannot stop payment announcements. Operations → CONTROLS has **TEST DRAW STREAM (60 s)** (Vietnamese channel).
 
 ### Payment-monitoring alert
 
