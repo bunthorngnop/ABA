@@ -818,3 +818,20 @@ def test_draw_stream_covers_the_right_half_of_the_whole_window():
         assert dashboard.draw_stream_rect() is None  # never repositioned over the Settings tab
     finally:
         dashboard.root.destroy()
+
+
+def test_daily_restart_closes_the_window_through_the_normal_path():
+    class Due:
+        def __init__(self): self.calls = 0
+        def due(self):
+            self.calls += 1
+            return self.calls >= 2
+
+    restart = Due()
+    dashboard = _make_dashboard(daily_restart=restart)
+    destroyed = []
+    dashboard.root.bind("<Destroy>", lambda e: destroyed.append(e.widget) if e.widget is dashboard.root else None, add="+")
+    dashboard._tick_daily_restart()
+    assert not destroyed and dashboard._daily_restart_after_id is not None  # not yet: checks again later
+    dashboard._tick_daily_restart()
+    assert destroyed == [dashboard.root]  # closed exactly like the ✕ button

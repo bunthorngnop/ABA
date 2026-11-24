@@ -22,6 +22,7 @@ from app.scheduled_announcements import (
 from app.single_instance import SingleInstanceLock
 from app.system_alerts import ALERT_TEXTS, PaymentHealthAlerts, alert_audio_path
 from app.telegram_listener import TelegramListener
+from app.daily_restart import DailyRestart
 from app.draw_stream import DrawStreamController
 from app.tts import CachedSpeech, EdgeKhmerSpeech, RecordedSpeech
 
@@ -166,6 +167,7 @@ def _run_application() -> int:
     draw_stream = DrawStreamController(
         settings.database_path.parent / "draw_stream_edge", lambda: datetime.now(CAMBODIA_TIMEZONE),
     )
+    daily_restart = DailyRestart(lambda: datetime.now(CAMBODIA_TIMEZONE), lambda: audio.idle)
     dashboard = Dashboard(
         lambda text: audio.enqueue(text),
         audio.set_muted,
@@ -183,6 +185,7 @@ def _run_application() -> int:
         nbc_history=store.load_nbc_history,
         initial_fuel_prices=initial_fuel_prices.as_dict() if initial_fuel_prices else None,
         draw_stream=draw_stream,
+        daily_restart=daily_restart,
     )
     rate_monitor = ExchangeRateMonitor(
         store,

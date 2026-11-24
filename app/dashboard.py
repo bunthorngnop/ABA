@@ -107,6 +107,7 @@ HISTORY_COLUMN_ANCHORS = ("e", "w", "center", "e")
 HISTORY_COLUMN_JUSTIFY = ("right", "left", "center", "right")
 # Scrolling ticker beside the DASHBOARD / SETTINGS tabs: today's totals and Ministry fuel prices.
 TICKER_INTERVAL_MS = 40
+DAILY_RESTART_CHECK_MS = 30_000
 TICKER_STEP_PX = 1.6  # about 40 px per second
 TICKER_GAP_PX = 90
 TICKER_FONT_SIZE = 12
@@ -663,6 +664,7 @@ class Dashboard:
         nbc_history: Optional[Callable[[int], list[Decimal]]] = None,
         initial_fuel_prices: Optional[dict[str, object]] = None,
         draw_stream=None,
+        daily_restart=None,
     ):
         self.root = tk.Tk()
         self.root.title("ABA Payment Speaker")
@@ -710,6 +712,9 @@ class Dashboard:
         # Lottery draw stream (separate Edge window) docked over the rates and private cards.
         self.draw_stream = draw_stream
         self._draw_stream_after_id = None
+        # Daily 07:30 close; the watchdog task starts ABA again.
+        self.daily_restart = daily_restart
+        self._daily_restart_after_id = None
         self._ticker_cycle = 0.0
         self._ticker_drawn: Optional[tuple] = None
         self._ticker_date = None
@@ -832,6 +837,23 @@ class Dashboard:
         self._build_ticker()
         if self.draw_stream is not None:
             self._draw_stream_after_id = self.root.after(3000, self._tick_draw_stream)
+        if self.daily_restart is not None:
+            self._daily_restart_after_id = self.root.after(DAILY_RESTART_CHECK_MS, self._tick_daily_restart)
+
+    def _tick_daily_restart(self) -> None:
+        self._daily_restart_after_id = None
+        try:
+            if self.daily_restart.due():
+                self.root.destroy()  # normal shutdown path, exactly like clicking ✕
+                return
+        except tk.TclError:
+            return
+        except Exception:
+            logging.getLogger(__name__).exception("Daily restart check failed")
+        try:
+            self._daily_restart_after_id = self.root.after(DAILY_RESTART_CHECK_MS, self._tick_daily_restart)
+        except tk.TclError:
+            pass
 
     def _configure_styles(self) -> None:
         style = ttk.Style(self.root)
@@ -1761,7 +1783,7 @@ class Dashboard:
             return
         for attribute in (
             "_rate_pulse_after_id", "_rate_group_start_after_id", "_rate_group_glow_after_id", "_ticker_after_id",
-            "_rate_fit_after_id", "_draw_stream_after_id",
+            "_rate_fit_after_id", "_draw_stream_after_id", "_daily_restart_after_id",
         ):
             after_id = getattr(self, attribute, None)
             if after_id is not None:

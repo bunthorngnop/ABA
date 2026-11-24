@@ -81,6 +81,12 @@ class AudioQueue:
             self._unfinished += 1
             self._condition.notify_all()
 
+    @property
+    def idle(self) -> bool:
+        """Nothing is being spoken and nothing is waiting."""
+        with self._condition:
+            return self._unfinished == 0
+
     def join(self, timeout: Optional[float] = None) -> bool:
         """Wait until every queued announcement has been handled."""
         deadline = None if timeout is None else time.monotonic() + timeout

@@ -186,3 +186,26 @@ def test_speech_service_429_is_retried_briefly(monkeypatch):
     monkeypatch.setattr("app.tts.TTS_RETRY_DELAYS_SECONDS", (0.01, 0.01))
     _Edge().synthesize("hello", Path("unused.mp3"))
     assert len(attempts) == 3
+
+
+def test_idle_only_when_nothing_is_spoken_or_waiting():
+    import threading
+
+    release = threading.Event()
+    started = threading.Event()
+
+    class Slow(FakeSpeech):
+        def speak(self, text):
+            started.set()
+            release.wait(5)
+            super().speak(text)
+
+    audio = AudioQueue(Slow())
+    assert audio.idle is True
+    audio.enqueue("payment")
+    started.wait(5)
+    assert audio.idle is False  # being spoken
+    release.set()
+    audio.join()
+    assert audio.idle is True
+    audio.stop()

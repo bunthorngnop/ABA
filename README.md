@@ -206,6 +206,17 @@ Every day ABA opens the lottery draw live stream in Google Chrome app mode with 
 
 Results come at half past the hour, about 5 minutes earlier on Tuesdays and Thursdays; the windows cover both. The stream window is docked over the right half of the whole ABA window, top to bottom, kept on top (compensating Windows' invisible borders), and closed at the end of the window and when ABA exits. ABA closes only its own window, never the owner's other Chrome windows. The Cambodian channel can go live late, so ABA reopens its page every minute until the window shows that hour's live video. If someone closes the stream it is not reopened until the next window. The browser is a separate program, so a browser problem cannot stop payment announcements. Operations → CONTROLS has **TEST DRAW STREAM (60 s)** (Vietnamese channel).
 
+**Chrome autoplay (one-time, as administrator, on each PC).** Chrome is usually already open, and a running Chrome ignores ABA's autoplay instruction, so without this setting the stream waits for a click on Play. Windows lets only an administrator store Chrome settings of this kind. Open **PowerShell as administrator** and run:
+
+```powershell
+New-Item -Path 'HKLM:\SOFTWARE\Policies\Google\Chrome\AutoplayAllowlist' -Force | Out-Null
+New-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Google\Chrome\AutoplayAllowlist' -Name '1' -Value '[*.]youtube.com' -PropertyType String -Force
+```
+
+Then close every Chrome window once (or open `chrome://policy` and click **Reload policies**). Only YouTube may then play with sound by itself; other sites keep Chrome's normal rules. Chrome's menu shows "Managed by your organization", which is expected. ABA checks this setting before its first stream each day and logs a warning if it is missing.
+
+**Daily restart.** Every morning at 07:30 (Cambodia time) ABA closes itself the normal way, after any announcement in progress, and the watchdog task starts it again within about a minute. It never restarts within an hour of starting, and skips the day if announcements keep it busy until 08:00. Payments that arrive during the 1–3 minutes it is offline are not spoken (they remain in Telegram). The watchdog task must be enabled for ABA to come back.
+
 ### Payment-monitoring alert
 
 The payment listener pings Telegram every 30 seconds. If payment monitoring stays down for 2 minutes (including no connection at startup), the male voice says `សូមជូនដំណឹង ប្រព័ន្ធទទួលប្រាក់ត្រូវបានផ្តាច់ សូមពិនិត្យអ៊ីនធឺណិត`, or `សូមចូល Telegram ឡើងវិញ` when Telegram has revoked or expired the login, and repeats every 10 minutes until it recovers, when `ប្រព័ន្ធទទួលប្រាក់បានភ្ជាប់ឡើងវិញ` is said once. Alerts play from pre-recorded files in `assets/` (no internet needed), are heard even when the speaker is muted, run at any time of day, and are active only in production mode.

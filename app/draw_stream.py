@@ -136,6 +136,65 @@ def browser_command(url: str, rect: Rect, edge_profile_dir: Path) -> Optional[li
     return None
 
 
+# --- Chrome autoplay (owner-approved option A, 2026-11-24) ---------------------------------------
+# The owner's Chrome is usually already running, and a running Chrome ignores the
+# --autoplay-policy flag of a new window, so the stream waited for a click on Play. Chrome's
+# per-user policy AutoplayAllowlist lets only YouTube play with sound by itself; every other site
+# keeps Chrome's normal rules. Chrome then shows "Managed by your organization" in its menu.
+CHROME_POLICY_KEY = r"Software\Policies\Google\Chrome\AutoplayAllowlist"
+AUTOPLAY_SITE = "[*.]youtube.com"
+
+
+def _allowlist_has_youtube(winreg, root) -> bool:
+    try:
+        with winreg.OpenKey(root, CHROME_POLICY_KEY, 0, winreg.KEY_READ) as key:
+            index = 0
+            while True:
+                try:
+                    _name, value, _kind = winreg.EnumValue(key, index)
+                except OSError:
+                    return False
+                if value == AUTOPLAY_SITE:
+                    return True
+                index += 1
+    except OSError:
+        return False
+
+
+def ensure_youtube_autoplay(registry=None) -> bool:
+    """True when YouTube is in Chrome's autoplay allowlist (machine-wide or this user's); adds it if possible.
+
+    Windows lets only an administrator write Chrome policies, so on a normal account the owner sets
+    it once (see README); ABA then only checks it.
+    """
+    try:
+        winreg = registry
+        if winreg is None:
+            import winreg  # type: ignore[no-redef]
+        if any(_allowlist_has_youtube(winreg, root) for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER)):
+            return True
+        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, CHROME_POLICY_KEY, 0,
+                                winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
+            names, index = set(), 0
+            while True:
+                try:
+                    name, value, _kind = winreg.EnumValue(key, index)
+                except OSError:
+                    break
+                if value == AUTOPLAY_SITE:
+                    return True
+                names.add(name)
+                index += 1
+            slot = next(str(n) for n in range(1, len(names) + 2) if str(n) not in names)
+            winreg.SetValueEx(key, slot, 0, winreg.REG_SZ, AUTOPLAY_SITE)
+            logger.info("Chrome autoplay allowed for YouTube (per-user policy)")
+            return True
+    except (OSError, ImportError) as exc:
+        logger.warning("Chrome autoplay for YouTube is not set (%s); an administrator must set it once "
+                       "(README: Chrome autoplay); until then the stream may need a click on Play", type(exc).__name__)
+        return False
+
+
 # --- Windows helpers (ctypes) -------------------------------------------------------------------
 
 _user32 = ctypes.windll.user32 if hasattr(ctypes, "windll") else None
@@ -223,7 +282,10 @@ class DrawStreamController:
         place: Callable[[int, Rect], None] = place_on_top,
         close: Callable[[int], None] = close_window,
         title: Callable[[int], str] = window_title,
+        ensure_autoplay: Callable[[], bool] = ensure_youtube_autoplay,
     ):
+        self.ensure_autoplay = ensure_autoplay
+        self._autoplay_ok = False
         self.edge_profile_dir = Path(edge_profile_dir)
         self.clock = clock
         self.launcher, self.command = launcher, command
@@ -310,6 +372,12 @@ class DrawStreamController:
 
     def _launch(self, rect: Rect, now: datetime, url: str = DRAW_STREAM_URL) -> None:
         self._url = url
+        if not self._autoplay_ok:
+            self._autoplay_ok = True  # checked once per ABA run (it restarts daily at 07:30)
+            try:
+                self.ensure_autoplay()
+            except Exception:
+                logger.exception("Chrome autoplay check failed")
         args = self.command(url, rect, self.edge_profile_dir)
         if args is None:
             logger.warning("Draw stream skipped: neither Chrome nor Edge was found")

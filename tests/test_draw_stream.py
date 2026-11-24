@@ -41,8 +41,14 @@ class FakeDesktop:
             place=lambda hwnd, rect: self.placed.append((hwnd, rect)),
             close=self.close,
             title=lambda hwnd: self.titles.get(hwnd, "XSMB Minh Ngọc - Trực tiếp"),
+            ensure_autoplay=self.allow_autoplay,
         )
+        self.autoplay_calls = 0
         self.titles = {1: "Inbox - Google Chrome"}
+
+    def allow_autoplay(self):
+        self.autoplay_calls += 1
+        return True
 
     def launch(self, args):
         self.launches.append(args)
@@ -208,3 +214,92 @@ def test_restored_normal_chrome_windows_are_never_mistaken_for_the_stream():
     desk.titles[60] = "News - Google Chrome"  # another restored window appears with the stream
     desk.controller.tick(RECT)
     assert desk.placed == [(101, RECT)]
+
+
+class FakeRegistry:
+    """Stands in for winreg (the real registry is never touched).
+
+    `values` is this user's allowlist, `machine` the machine-wide one; `writable=False` behaves like
+    a normal account, where Windows refuses writes under Software\\Policies.
+    """
+
+    HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_SET_VALUE, REG_SZ = "HKCU", "HKLM", 1, 2, 1
+
+    def __init__(self, values=None, machine=None, writable=True):
+        self.values = dict(values or {})
+        self.machine = machine
+        self.writable = writable
+        self.opened = []
+
+    def _key(self, values):
+        class Key:
+            def __enter__(self): return values
+            def __exit__(self, *exc): return False
+
+        return Key()
+
+    def OpenKey(self, root, path, reserved, access):
+        values = self.machine if root == "HKLM" else (self.values or None)
+        if values is None:
+            raise FileNotFoundError(path)
+        return self._key(values)
+
+    def CreateKeyEx(self, root, path, reserved, access):
+        if not self.writable:
+            raise PermissionError(path)
+        self.opened.append((root, path))
+        return self._key(self.values)
+
+    def EnumValue(self, key, index):
+        items = list(key.items())
+        if index >= len(items):
+            raise OSError("no more values")
+        name, value = items[index]
+        return name, value, self.REG_SZ
+
+    def SetValueEx(self, key, name, reserved, kind, value):
+        key[name] = value
+
+
+def test_autoplay_set_machine_wide_by_an_administrator_is_recognised():
+    from app.draw_stream import ensure_youtube_autoplay
+
+    registry = FakeRegistry(machine={"1": "[*.]youtube.com"}, writable=False)
+    assert ensure_youtube_autoplay(registry) is True
+    assert registry.values == {}  # nothing written
+
+
+def test_autoplay_not_set_on_a_normal_account_reports_false_without_crashing():
+    from app.draw_stream import ensure_youtube_autoplay
+
+    assert ensure_youtube_autoplay(FakeRegistry(writable=False)) is False
+
+
+def test_youtube_autoplay_is_added_to_chromes_per_user_allowlist():
+    from app.draw_stream import AUTOPLAY_SITE, CHROME_POLICY_KEY, ensure_youtube_autoplay
+
+    registry = FakeRegistry()
+    assert ensure_youtube_autoplay(registry) is True
+    assert registry.values == {"1": "[*.]youtube.com"} == {"1": AUTOPLAY_SITE}
+    assert registry.opened == [(registry.HKEY_CURRENT_USER, r"Software\Policies\Google\Chrome\AutoplayAllowlist")]
+    assert CHROME_POLICY_KEY.startswith(r"Software\Policies\Google\Chrome")
+
+
+def test_youtube_autoplay_keeps_other_entries_and_is_not_added_twice():
+    from app.draw_stream import ensure_youtube_autoplay
+
+    registry = FakeRegistry({"1": "https://example.org"})
+    ensure_youtube_autoplay(registry)
+    ensure_youtube_autoplay(registry)
+    assert registry.values == {"1": "https://example.org", "2": "[*.]youtube.com"}
+
+
+def test_autoplay_is_ensured_once_before_the_first_launch():
+    desk = FakeDesktop(at(16, 6))
+    desk.controller.tick(RECT)
+    desk.controller.tick(RECT)
+    desk.now = at(16, 40)
+    desk.controller.tick(RECT)  # window ends: stream closed
+    desk.now = at(18, 6)
+    desk.controller.tick(RECT)
+    assert desk.autoplay_calls == 1 and len(desk.launches) == 2
