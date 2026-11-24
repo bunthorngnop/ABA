@@ -42,9 +42,20 @@ class FakeDesktop:
             close=self.close,
             title=lambda hwnd: self.titles.get(hwnd, "XSMB Minh Ngọc - Trực tiếp"),
             ensure_autoplay=self.allow_autoplay,
+            resolve=self.lookup,
+            background=lambda work: work(),  # run the lookup at once (no threads in tests)
+            player_page=lambda video_id: f"http://127.0.0.1:1/player?v={video_id}",
         )
         self.autoplay_calls = 0
+        self.live = {}  # channel url -> LiveVideo; a channel missing here fails like a network error
+        self.lookups = []
         self.titles = {1: "Inbox - Google Chrome"}
+
+    def lookup(self, url):
+        self.lookups.append(url)
+        if url not in self.live:
+            raise OSError("no network in tests")
+        return self.live[url]
 
     def allow_autoplay(self):
         self.autoplay_calls += 1
@@ -303,3 +314,120 @@ def test_autoplay_is_ensured_once_before_the_first_launch():
     desk.now = at(18, 6)
     desk.controller.tick(RECT)
     assert desk.autoplay_calls == 1 and len(desk.launches) == 2
+
+
+# --- Player-only page (owner-approved 2026-11-24) ---
+
+MN_LIVE_PAGE = (
+    '<html><head><link rel="canonical" href="https://www.youtube.com/watch?v=bWi0ebH0VB0">'
+    '<meta name="title" content="XSMB Minh Ngọc - Trực tiếp Xổ Số Miền Bắc &amp; KQXS">'
+    '</head><script>{"isLiveNow":true}</script></html>'
+)
+
+
+def live(video_id, title, live_now=True):
+    from app.draw_stream import LiveVideo
+    return LiveVideo(video_id, title, live_now)
+
+
+def test_live_page_gives_the_video_id_title_and_live_status():
+    from app.draw_stream import parse_live_page, player_url
+
+    video = parse_live_page(MN_LIVE_PAGE)
+    assert video.video_id == "bWi0ebH0VB0" and video.live_now is True
+    assert video.title == "XSMB Minh Ngọc - Trực tiếp Xổ Số Miền Bắc & KQXS"
+    assert parse_live_page(MN_LIVE_PAGE.replace('"isLiveNow":true', '')).live_now is False  # an ended stream
+    assert parse_live_page('<link rel="canonical" href="https://www.youtube.com/channel/UC1">') is None
+    assert player_url("bWi0ebH0VB0") == "https://www.youtube.com/embed/bWi0ebH0VB0?autoplay=1&rel=0&playsinline=1"
+
+
+def test_opens_the_player_only_page_of_the_live_video():
+    desk = FakeDesktop(at(16, 6))
+    desk.live[DRAW_STREAM_URL] = live("bWi0ebH0VB0", "XSMN Minh Ngọc - Trực tiếp")
+    desk.controller.tick(RECT)
+    assert desk.launches == [["chrome.exe", "--app=http://127.0.0.1:1/player?v=bWi0ebH0VB0"]]
+    desk.controller.tick(RECT)
+    assert desk.placed == [(101, RECT)]
+
+
+def test_falls_back_to_the_live_page_when_the_lookup_fails_or_nothing_is_live():
+    desk = FakeDesktop(at(16, 6))  # lookup fails (no entry)
+    desk.controller.tick(RECT)
+    assert desk.launches[-1] == ["chrome.exe", f"--app={DRAW_STREAM_URL}"]
+    desk = FakeDesktop(at(18, 6))
+    desk.live[DRAW_STREAM_URL] = live("oldvideo123", "XSMB yesterday", live_now=False)
+    desk.controller.tick(RECT)
+    assert desk.launches[-1] == ["chrome.exe", f"--app={DRAW_STREAM_URL}"]
+
+
+def test_cambodian_window_opens_only_when_that_hours_live_has_started():
+    desk = FakeDesktop(at(19, 15))
+    desk.live[CAMBODIAN_STREAM_URL] = live("xGxcf6tpEDQ", "🔴LIVE ! លទ្ធផលឆ្នោតយួន | ម៉ោង 06:30 នាទី", live_now=False)
+    desk.controller.tick(RECT)
+    assert desk.launches == []  # the last stream (18:30) has ended: wait
+    desk.now += timedelta(seconds=LIVE_RELOAD_SECONDS - 1)
+    desk.controller.tick(RECT)
+    assert len(desk.lookups) == 1  # checks again only after a minute
+    desk.now += timedelta(seconds=1)
+    desk.live[CAMBODIAN_STREAM_URL] = live("Av6ez-UWyuQ", "🔴LIVE ! លទ្ធផលឆ្នោតយួន | ម៉ោង 07:30 នាទី")
+    desk.controller.tick(RECT)
+    assert desk.launches == [["chrome.exe", "--app=http://127.0.0.1:1/player?v=Av6ez-UWyuQ"]]
+    desk.controller.tick(RECT)
+    desk.titles[101] = "YouTube"  # the player page title is not checked: never reopened
+    desk.now += timedelta(seconds=10 * LIVE_RELOAD_SECONDS)
+    desk.controller.tick(RECT)
+    assert desk.closed == [] and len(desk.launches) == 1
+
+
+def test_a_lookup_answer_is_never_reused_for_a_later_window():
+    desk = FakeDesktop(at(16, 6))
+    desk.live[DRAW_STREAM_URL] = live("firstvideo1", "XSMN live")
+    desk.controller.tick(RECT)
+    desk.controller.tick(RECT)
+    desk.now = at(16, 40)
+    desk.controller.tick(RECT)
+    desk.live[DRAW_STREAM_URL] = live("secondvideo", "XSMB live")
+    desk.now = at(18, 6)
+    desk.controller.tick(RECT)
+    assert desk.launches[-1][1].endswith("player?v=secondvideo")
+
+
+def test_local_player_page_holds_only_the_youtube_player_and_serves_nothing_else():
+    import urllib.error
+    import urllib.request
+
+    from app.draw_stream import PlayerPageServer
+
+    server = PlayerPageServer()
+    try:
+        url = server.url("bWi0ebH0VB0")
+        assert url.startswith("http://127.0.0.1:") and url.endswith("/player?v=bWi0ebH0VB0")
+        page = urllib.request.urlopen(url, timeout=5).read().decode("utf-8")
+        assert '<iframe src="https://www.youtube.com/embed/bWi0ebH0VB0?autoplay=1&rel=0&playsinline=1"' in page
+        assert 'allow="autoplay' in page and 'referrerpolicy="strict-origin-when-cross-origin"' in page
+        base = url.split("/player")[0]
+        for bad in ("/player?v=../../etc", "/player?v=%3Cscript%3E", "/", "/other?v=bWi0ebH0VB0"):
+            try:
+                urllib.request.urlopen(base + bad, timeout=5)
+                raise AssertionError(f"served {bad}")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 404
+    finally:
+        server.stop()
+    try:
+        PlayerPageServer().url("not-an-id")
+        raise AssertionError("accepted a bad id")
+    except ValueError:
+        pass
+
+
+def test_falls_back_to_the_live_page_if_the_player_page_cannot_start():
+    desk = FakeDesktop(at(16, 6))
+    desk.live[DRAW_STREAM_URL] = live("bWi0ebH0VB0", "XSMN live")
+
+    def broken(video_id):
+        raise OSError("port unavailable")
+
+    desk.controller.player_page = broken
+    desk.controller.tick(RECT)
+    assert desk.launches[-1] == ["chrome.exe", f"--app={DRAW_STREAM_URL}"]

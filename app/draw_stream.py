@@ -22,6 +22,7 @@ import ctypes
 import logging
 import re
 import subprocess
+import threading
 from ctypes import wintypes
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
@@ -86,6 +87,118 @@ def active_draw_window(now: datetime) -> Optional[str]:
     """The draw window containing `now` as "HH:MM-HH:MM", or None."""
     window = draw_window_at(now)
     return window.label if window else None
+
+
+# --- Player-only page (owner-approved 2026-11-24) -------------------------------------------------
+# ABA looks up the channel's current live video and opens YouTube's player-only (embed) page, so
+# the window shows just the video: no comments, titles or suggestions. If the lookup fails, the
+# normal /live page is opened instead.
+
+@dataclass(frozen=True)
+class LiveVideo:
+    video_id: str
+    title: str
+    live_now: bool
+
+
+_CANONICAL = re.compile(r'<link rel="canonical" href="https://www\.youtube\.com/watch\?v=([\w-]{11})"')
+_META_TITLE = re.compile(r'<meta name="title" content="([^"]*)"')
+
+
+def parse_live_page(page: str) -> Optional[LiveVideo]:
+    """The video a channel's /live page points at, or None when it shows the channel instead."""
+    import html
+
+    match = _CANONICAL.search(page)
+    if match is None:
+        return None
+    title = _META_TITLE.search(page)
+    return LiveVideo(match.group(1), html.unescape(title.group(1)) if title else "", '"isLiveNow":true' in page)
+
+
+def fetch_live_video(channel_url: str, timeout: float = 15.0) -> Optional[LiveVideo]:
+    """Read the channel's /live page (public, no sign-in). Raises OSError on network problems."""
+    import urllib.request
+
+    request = urllib.request.Request(channel_url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Accept-Language": "en"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        page = response.read(6_000_000).decode("utf-8", "ignore")
+    return parse_live_page(page)
+
+
+def player_url(video_id: str) -> str:
+    return f"https://www.youtube.com/embed/{video_id}?autoplay=1&rel=0&playsinline=1"
+
+
+# YouTube refuses its player page when it is opened directly ("Error 153", no referring page), so
+# ABA serves a tiny page on this PC only (127.0.0.1, random port) that holds just the player.
+_VIDEO_ID = re.compile(r"[\w-]{11}")
+
+
+def player_page_html(video_id: str) -> bytes:
+    return (
+        '<!doctype html><html><head><meta charset="utf-8"><title>Draw stream</title>'
+        "<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}"
+        "iframe{border:0;width:100%;height:100%}</style></head><body>"
+        f'<iframe src="{player_url(video_id)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" '
+        'allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></body></html>'
+    ).encode("utf-8")
+
+
+class PlayerPageServer:
+    """Serves GET /player?v=<video id> on 127.0.0.1 only; anything else is 404."""
+
+    def __init__(self):
+        self._server = None
+        self._lock = threading.Lock()
+
+    def url(self, video_id: str) -> str:
+        if not _VIDEO_ID.fullmatch(video_id):
+            raise ValueError("not a YouTube video id")
+        with self._lock:
+            if self._server is None:
+                self._server = self._start()
+            port = self._server.server_address[1]
+        return f"http://127.0.0.1:{port}/player?v={video_id}"
+
+    @staticmethod
+    def _start():
+        import http.server
+        from urllib.parse import parse_qs, urlsplit
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                parts = urlsplit(self.path)
+                video_id = parse_qs(parts.query).get("v", [""])[0]
+                if parts.path != "/player" or not _VIDEO_ID.fullmatch(video_id):
+                    self.send_error(404)
+                    return
+                body = player_page_html(video_id)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, name="draw-stream-page", daemon=True).start()
+        return server
+
+    def stop(self) -> None:
+        with self._lock:
+            server, self._server = self._server, None
+        if server is not None:
+            server.shutdown()
+            server.server_close()
+
+
+PLAYER_PAGES = PlayerPageServer()
 
 
 _HOUR_IN_TITLE = re.compile(r"ម៉ោង\s*(\d{1,2})\s*[:.]\s*\d{2}")
@@ -283,9 +396,19 @@ class DrawStreamController:
         close: Callable[[int], None] = close_window,
         title: Callable[[int], str] = window_title,
         ensure_autoplay: Callable[[], bool] = ensure_youtube_autoplay,
+        resolve: Callable[[str], Optional[LiveVideo]] = fetch_live_video,
+        background: Callable[[Callable[[], None]], None] = lambda work: threading.Thread(
+            target=work, name="draw-stream-lookup", daemon=True).start(),
+        player_page: Callable[[str], str] = PLAYER_PAGES.url,
     ):
+        self.player_page = player_page
         self.ensure_autoplay = ensure_autoplay
         self._autoplay_ok = False
+        self.resolve, self.background = resolve, background
+        self._lookup_pending = False
+        self._lookup_result: Optional[tuple[str, str, Optional[LiveVideo]]] = None  # (channel, "ok"/"error", video)
+        self._player_only = False  # the open window shows the player-only page
+        self._lookup_at = clock()
         self.edge_profile_dir = Path(edge_profile_dir)
         self.clock = clock
         self.launcher, self.command = launcher, command
@@ -331,7 +454,8 @@ class DrawStreamController:
         key = f"{now:%Y-%m-%d} {window or 'test'}"
         if self._hwnd is not None:
             if self.exists(self._hwnd):
-                if (draw is not None and draw.reload_until_live and self._docked_at is not None
+                if (draw is not None and draw.reload_until_live and not self._player_only
+                        and self._docked_at is not None
                         and now - self._docked_at >= timedelta(seconds=LIVE_RELOAD_SECONDS)
                         and not shows_live_draw(self.title(self._hwnd), draw.draw_hour)):
                     # The channel is not live with this draw yet: reopen its live page.
@@ -368,9 +492,58 @@ class DrawStreamController:
             return  # already shown in this draw window (and then closed by hand)
         if self._retry_at is not None and now < self._retry_at:
             return
-        self._launch(rect, now, url)
+        target = self._target(draw, url, now)
+        if target is not None:
+            self._launch(rect, now, url, target)
 
-    def _launch(self, rect: Rect, now: datetime, url: str = DRAW_STREAM_URL) -> None:
+    def _start_lookup(self, channel_url: str) -> None:
+        self._lookup_pending = True
+
+        def work() -> None:
+            try:
+                result = (channel_url, "ok", self.resolve(channel_url))
+            except Exception as exc:
+                logger.info("Live video lookup failed (%s); the normal live page will be used", type(exc).__name__)
+                result = (channel_url, "error", None)
+            self._lookup_result = result
+            self._lookup_at = self.clock()
+            self._lookup_pending = False
+
+        self.background(work)
+
+    def _target(self, draw: Optional[DrawWindow], channel_url: str, now: datetime) -> Optional[str]:
+        """The page to open now, or None while looking up / waiting for the right live."""
+        if self._lookup_pending:
+            return None
+        if self._lookup_result is not None and now - self._lookup_at > timedelta(seconds=LIVE_RELOAD_SECONDS):
+            self._lookup_result = None  # too old (e.g. from an earlier draw window)
+        if self._lookup_result is None or self._lookup_result[0] != channel_url:
+            self._start_lookup(channel_url)
+            if self._lookup_pending or self._lookup_result is None:
+                return None  # answer arrives in the background
+        _channel, status, video = self._lookup_result
+        self._lookup_result = None  # look up afresh next time
+        if status == "error":
+            self._player_only = False
+            return channel_url  # fallback: the normal live page
+        reload = draw is not None and draw.reload_until_live
+        if video is not None and video.live_now and (not reload or shows_live_draw(video.title, draw.draw_hour)):
+            try:
+                page = self.player_page(video.video_id)
+            except Exception as exc:
+                logger.warning("Player page unavailable (%s); the normal live page will be used", type(exc).__name__)
+                self._player_only = False
+                return channel_url
+            self._player_only = True
+            return page
+        if reload:
+            logger.info("Draw stream: that hour's live has not started yet; checking again in %s s", LIVE_RELOAD_SECONDS)
+            self._retry_at = now + timedelta(seconds=LIVE_RELOAD_SECONDS)
+            return None
+        self._player_only = False
+        return channel_url
+
+    def _launch(self, rect: Rect, now: datetime, url: str = DRAW_STREAM_URL, target: Optional[str] = None) -> None:
         self._url = url
         if not self._autoplay_ok:
             self._autoplay_ok = True  # checked once per ABA run (it restarts daily at 07:30)
@@ -378,7 +551,7 @@ class DrawStreamController:
                 self.ensure_autoplay()
             except Exception:
                 logger.exception("Chrome autoplay check failed")
-        args = self.command(url, rect, self.edge_profile_dir)
+        args = self.command(target or url, rect, self.edge_profile_dir)
         if args is None:
             logger.warning("Draw stream skipped: neither Chrome nor Edge was found")
             self._retry_at = now + timedelta(seconds=RETRY_SECONDS)
@@ -387,7 +560,8 @@ class DrawStreamController:
         try:
             self.launcher(args)
             self._launched_at = now
-            logger.info("Draw stream launching in %s", Path(args[0]).stem)
+            logger.info("Draw stream launching in %s (%s)", Path(args[0]).stem,
+                        "player only" if target and target != url else "live page")
         except OSError as exc:
             logger.warning("Draw stream could not be launched (%s); retrying in %s s", type(exc).__name__, RETRY_SECONDS)
             self._retry_at = now + timedelta(seconds=RETRY_SECONDS)
@@ -396,6 +570,7 @@ class DrawStreamController:
         hwnd, self._hwnd = self._hwnd, None
         self._launched_at = None
         self._docked_at = None
+        self._player_only = False
         if hwnd is not None and self.exists(hwnd):
             try:
                 self.close_one(hwnd)

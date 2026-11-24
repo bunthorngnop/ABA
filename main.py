@@ -23,7 +23,7 @@ from app.single_instance import SingleInstanceLock
 from app.system_alerts import ALERT_TEXTS, PaymentHealthAlerts, alert_audio_path
 from app.telegram_listener import TelegramListener
 from app.daily_restart import DailyRestart
-from app.draw_stream import DrawStreamController
+from app.draw_stream import PLAYER_PAGES, DrawStreamController
 from app.tts import CachedSpeech, EdgeKhmerSpeech, RecordedSpeech
 
 
@@ -256,6 +256,7 @@ def _run_application() -> int:
     finally:
         run_cleanup_steps([
             ("draw stream", draw_stream.close),
+            ("draw stream player page", PLAYER_PAGES.stop),
             ("time voice recorder", prewarm_stop.set),
             ("payment alerts", payment_alerts.stop),
             ("rate-group reader", rate_group_reader.stop),
