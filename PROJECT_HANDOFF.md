@@ -386,6 +386,13 @@ This mechanism applies when Codex is actively working in this repository. It can
 
 ## Conversation and Decision Log
 
+### 2026-11-24 — Second PC (all-in-one) planned with its own Telegram account
+
+- Owner wants an identical ABA on another all-in-one PC that shares the same Dropbox folder, running at the same time as PC3 but logged in with a different Telegram account. Discussion and guidance only; no code changed.
+- Read-only checks (names only): the Dropbox workspace is the source folder and also holds a `.env`, `.venv` and a `data` SQLite file, which Dropbox syncs to the other PC; they must not be used there. Production is the separate Git clone `C:\ABA Payment Speaker`; Telegram sessions, the live database and the time voices are in `%LOCALAPPDATA%\ABA Payment Speaker` on each PC. GitHub `main` is still `6800989`; local commit `ed484a2` (two-channel draw stream) is not pushed yet.
+- PC3's ABA has not been restarted since 2026-11-22 13:08, so production still runs the previous draw-stream code; the owner must close it with ✕ once.
+- Guidance given: push first, then on PC2 clone from GitHub into `C:\ABA Payment Speaker` (never run from Dropbox), run `SET UP ON THIS PC.bat`, create PC2's own `.env`, have the second Telegram account join the payment group, the rate group and the fuel channel before the one-time login, start in diagnostic mode, then create PC2's own scheduled task. `OTHER_PC_SETUP.md` still says to run on one PC at a time; updating it for two simultaneous PCs with separate accounts is proposed, not done.
+
 ### 2026-11-22 — Lottery channel schedule check; scope kept to 16:00 and 18:00
 
 - Read-only check of the Xổ Số Minh Ngọc channel's public feed (latest 15 videos, Fri 20 and Sat 21 Nov only). Observed live broadcasts (Cambodia time): all regions 15:45–21:00, South from 16:00 (draw about 16:15–16:35), Central 17:00–18:30 (draw about 17:15–17:35), North from 17:50 (draw about 18:15–18:35). No 10:00, 13:00 or 19:00 broadcasts were found. The owner's note that Tue/Thu draws run about 5 minutes earlier could not be verified from this sample, but the current windows start early enough either way.
