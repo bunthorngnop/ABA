@@ -403,8 +403,8 @@ def test_local_player_page_holds_only_the_youtube_player_and_serves_nothing_else
         url = server.url("bWi0ebH0VB0")
         assert url.startswith("http://127.0.0.1:") and url.endswith("/player?v=bWi0ebH0VB0")
         page = urllib.request.urlopen(url, timeout=5).read().decode("utf-8")
-        assert '<iframe src="https://www.youtube.com/embed/bWi0ebH0VB0?autoplay=1&rel=0&playsinline=1"' in page
-        assert 'allow="autoplay' in page and 'referrerpolicy="strict-origin-when-cross-origin"' in page
+        assert '<script src="https://www.youtube.com/iframe_api"></script>' in page
+        assert "videoId:'bWi0ebH0VB0'" in page and "VOLUME=20" in page
         base = url.split("/player")[0]
         for bad in ("/player?v=../../etc", "/player?v=%3Cscript%3E", "/", "/other?v=bWi0ebH0VB0"):
             try:
@@ -431,3 +431,20 @@ def test_falls_back_to_the_live_page_if_the_player_page_cannot_start():
     desk.controller.player_page = broken
     desk.controller.tick(RECT)
     assert desk.launches[-1] == ["chrome.exe", f"--app={DRAW_STREAM_URL}"]
+
+
+def test_player_page_sets_the_stream_volume_to_20_percent_unmuted():
+    from app.draw_stream import DRAW_STREAM_VOLUME, player_page_html
+
+    assert DRAW_STREAM_VOLUME == 20  # owner, 2026-11-24
+    page = player_page_html("bWi0ebH0VB0").decode("utf-8")
+    assert "VOLUME=20" in page and "p.unMute();p.setVolume(VOLUME)" in page
+    assert "onReady:function(e){setVolume(e.target)" in page  # set as soon as the player is ready
+    assert "if(e.data===1&&!applied)" in page  # and again when it first starts playing
+    assert "autoplay:1" in page and "origin:location.origin" in page
+    assert "VOLUME=100" in player_page_html("bWi0ebH0VB0", 250).decode("utf-8")  # kept within 0-100
+    try:
+        player_page_html("bad'id</script>")
+        raise AssertionError("accepted a bad id")
+    except ValueError:
+        pass

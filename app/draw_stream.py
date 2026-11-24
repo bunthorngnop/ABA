@@ -136,13 +136,30 @@ def player_url(video_id: str) -> str:
 _VIDEO_ID = re.compile(r"[\w-]{11}")
 
 
-def player_page_html(video_id: str) -> bytes:
+# Stream volume in percent (owner, 2026-11-24). The player window keeps its own YouTube volume,
+# separate from youtube.com, so the page sets it through YouTube's IFrame Player API on every open.
+DRAW_STREAM_VOLUME = 20
+
+
+def player_page_html(video_id: str, volume: int = DRAW_STREAM_VOLUME) -> bytes:
+    """Page holding only the YouTube player, unmuted at `volume` %; the title reports the volume."""
+    if not _VIDEO_ID.fullmatch(video_id):
+        raise ValueError("not a YouTube video id")
+    volume = max(0, min(100, int(volume)))
     return (
         '<!doctype html><html><head><meta charset="utf-8"><title>Draw stream</title>'
-        "<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}"
-        "iframe{border:0;width:100%;height:100%}</style></head><body>"
-        f'<iframe src="{player_url(video_id)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" '
-        'allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></body></html>'
+        "<style>html,body,#player{margin:0;width:100%;height:100%;background:#000;overflow:hidden}"
+        "iframe{border:0;width:100%;height:100%}</style></head><body><div id=\"player\"></div>"
+        '<script src="https://www.youtube.com/iframe_api"></script><script>'
+        f"var VOLUME={volume},applied=false;"
+        "function setVolume(p){p.unMute();p.setVolume(VOLUME);"
+        "setTimeout(function(){document.title='Draw stream - volume '+p.getVolume();},500);}"
+        "function onYouTubeIframeAPIReady(){new YT.Player('player',{"
+        f"videoId:'{video_id}',width:'100%',height:'100%',"
+        "playerVars:{autoplay:1,rel:0,playsinline:1,origin:location.origin},"
+        "events:{onReady:function(e){setVolume(e.target);e.target.playVideo();},"
+        "onStateChange:function(e){if(e.data===1&&!applied){applied=true;setVolume(e.target);}}}});}"
+        "</script></body></html>"
     ).encode("utf-8")
 
 
