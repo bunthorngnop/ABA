@@ -248,13 +248,13 @@ def test_rates_table_with_official_cny_row_and_nbc_glass_card_show_figures_and_a
         assert dashboard.rate_title_label.cget("fg") == "#FFE08A"
         assert tkfont.Font(root=dashboard.root, font=dashboard.rate_title_label.cget("font")).actual("family") == "Bokor"
         assert dashboard.rate_age_label.master is dashboard.rate_title_band  # status line under the title
-        assert list(dashboard.rate_display_labels) == ["ACLEDA", "WING", "CNY"]
+        assert list(dashboard.rate_display_labels) == ["ACLEDA", "WING", "SBI", "CNY"]  # SBI below WING (2026-11-26)
         labels = dashboard.rate_display_labels
         assert labels["ACLEDA"]["buy"].cget("text") == "4,081" and labels["ACLEDA"]["sell"] is None
         assert labels["WING"]["buy"].cget("text") == "4,083" and labels["WING"]["sell"] is None
         cny = labels["CNY"]
         assert cny["bank"].cget("text") == "លុយយ័នចិន"
-        assert tkfont.Font(root=dashboard.root, font=cny["bank"].cget("font")).actual("family") == "Siemreap"
+        assert tkfont.Font(root=dashboard.root, font=cny["bank"].cget("font")).actual("family") == "Bokor"  # 2026-11-26
         assert (cny["official"].cget("text"), cny["unit"].cget("text")) == ("6.7174", "¥")
         assert int(cny["official_cell"].grid_info()["column"]) == 1
         assert cny["caption"].cget("text") == "PBOC central rate · 12 Nov"
@@ -609,11 +609,11 @@ def test_bank_logos_replace_category_text_and_rows_do_not_grow():
             source: (labels["row"].winfo_height(), labels["row"].winfo_width())
             for source, labels in dashboard.rate_display_labels.items()
         }
-        for source in ("ACLEDA", "WING"):
+        for source in ("ACLEDA", "WING", "SBI", "CNY"):
             category = dashboard.rate_display_labels[source]["category"]
             assert category.cget("image"), f"{source} logo should be shown"
             assert category.cget("text") == ""
-            assert category.winfo_reqheight() == 60
+            assert category.winfo_reqheight() == 44  # all four logos the same height (60 px before the 4th row)
             cell = dashboard.rate_display_labels[source]["row"]
             center = category.winfo_rootx() + category.winfo_width() / 2
             assert abs(center - (cell.winfo_rootx() + cell.winfo_width() / 2)) <= 3
@@ -625,7 +625,7 @@ def test_bank_logos_replace_category_text_and_rows_do_not_grow():
         }
         assert after == before
         _layout(dashboard, "900x600")
-        assert dashboard.rate_display_labels["ACLEDA"]["category"].winfo_reqheight() == 44
+        assert dashboard.rate_display_labels["ACLEDA"]["category"].winfo_reqheight() == 30  # narrow layout
     finally:
         dashboard.root.destroy()
 
@@ -766,7 +766,10 @@ def test_cny_figure_grows_to_fill_its_cell_without_resizing_rows():
             assert content.winfo_reqheight() <= cell.winfo_height()
             size = tkfont.Font(root=dashboard.root, font=cny["official"].cget("font")).cget("size")
             assert dashboard._cny_fits(size, "6.7174", cell.winfo_width(), cell.winfo_height())
-            assert size == 44 or not dashboard._cny_fits(size + 1, "6.7174", cell.winfo_width(), cell.winfo_height())
+            # All four figures share one size: the yuan figure's own limit or a bank row's, whichever is smaller.
+            bank = {tkfont.Font(root=dashboard.root, font=dashboard.rate_display_labels[s]["buy"].cget("font")).cget("size")
+                    for s in ("ACLEDA", "WING", "SBI")}
+            assert bank == {size}
         finally:
             dashboard.root.destroy()
 
@@ -835,3 +838,65 @@ def test_daily_restart_closes_the_window_through_the_normal_path():
     assert not destroyed and dashboard._daily_restart_after_id is not None  # not yet: checks again later
     dashboard._tick_daily_restart()
     assert destroyed == [dashboard.root]  # closed exactly like the ✕ button
+
+
+def _rates_with_sbi(previous=None):
+    from app.exchange_rates import ExchangeRate
+
+    rates = _rates()
+    rates["SBI"] = ExchangeRate("SBI", "Notes", None, Decimal("4056"), Decimal("4072"), "November 26, 2026",
+                                rates["ACLEDA"].fetched_at, previous_buy_rate=previous)
+    return rates
+
+
+def test_sbi_row_below_wing_four_equal_rows_card_size_unchanged():
+    """Owner, 2026-11-26: SBI row added below WING; four equal rows; same text and logo sizes; card not taller."""
+    from app.dashboard import BANK_LOGO_HEIGHTS
+
+    three_row_table_height = 437  # measured on the dashboard screen before the SBI row
+    dashboard = _make_dashboard(initial_exchange_rates=_rates_with_sbi(previous=Decimal("4060")))
+    try:
+        _layout(dashboard, "1382x744")
+        dashboard._fit_rate_figures()
+        dashboard.root.update()
+        labels = dashboard.rate_display_labels
+        assert list(labels) == ["ACLEDA", "WING", "SBI", "CNY"]
+        assert dashboard.rate_table.winfo_height() == three_row_table_height
+        heights = [labels[s]["row"].winfo_height() for s in labels]
+        assert max(heights) - min(heights) <= 1  # equal rows
+        figures = [labels[s]["buy"] or labels[s]["official"] for s in labels]
+        sizes = {tkfont.Font(root=dashboard.root, font=f.cget("font")).cget("size") for f in figures}
+        assert len(sizes) == 1  # same text size in all four rows
+        logos = {labels[s]["category"].winfo_reqheight() for s in labels}
+        assert logos == {BANK_LOGO_HEIGHTS[False]} == {44}
+        sbi = labels["SBI"]
+        assert sbi["buy"].cget("text") == "4,056" and sbi["sell"] is None  # only SBI's Sell figure is shown
+        assert sbi["buy"].cget("fg") == labels["ACLEDA"]["buy"].cget("fg")  # same colour as the other banks
+        assert sbi["buy_arrow"].cget("text") == "▼"  # same trend arrows as the other rows
+        for source, text in (("SBI", "លីហ៊ួរ"), ("CNY", "លុយយ័នចិន")):
+            font = tkfont.Font(root=dashboard.root, font=labels[source]["bank"].cget("font"))
+            assert labels[source]["bank"].cget("text") == text and font.actual("family") == "Bokor"
+        for source in labels:  # nothing spills out of its cell
+            cell = labels[source]["buy_cell"] or labels[source]["official_cell"]
+            content = (labels[source]["buy"] or labels[source]["official"]).master
+            if source == "CNY":
+                content = content.master
+            assert content.winfo_reqheight() <= cell.winfo_height()
+            assert content.winfo_reqwidth() <= cell.winfo_width()
+    finally:
+        dashboard.root.destroy()
+
+
+def test_khmer_row_names_fit_on_small_windows():
+    dashboard = _make_dashboard(initial_exchange_rates=_rates_with_sbi())
+    try:
+        for geometry in ("900x600", "1180x800"):
+            _layout(dashboard, geometry)
+            dashboard._fit_rate_figures()
+            dashboard.root.update()
+            for source in ("SBI", "CNY"):
+                bank, row = dashboard.rate_display_labels[source]["bank"], dashboard.rate_display_labels[source]["row"]
+                assert bank.winfo_reqwidth() <= row.winfo_width()
+                assert tkfont.Font(root=dashboard.root, font=bank.cget("font")).actual("family") == "Bokor"
+    finally:
+        dashboard.root.destroy()

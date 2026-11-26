@@ -46,6 +46,12 @@ RATE_SOURCES = (
         "Telegraphic Transfer Outbound",
         "https://www.wingbank.com.kh/en/exchange-rate",
     ),
+    # SBI LY HOUR Bank (owner, 2026-11-26): only its USD/KHR "Sell" figure is shown.
+    RateSource(
+        "SBI",
+        "Notes",
+        "https://www.sbibank.com.kh/en/resources/foreign-exchange",
+    ),
 )
 GOLD_SOURCE = RateSource(
     "GOLD",
@@ -259,10 +265,49 @@ def parse_wing_page(html: str, fetched_at: Optional[datetime] = None) -> Exchang
     )
 
 
+SBI_RATE_MIN, SBI_RATE_MAX = Decimal("3000"), Decimal("6000")  # sanity range for KHR per USD
+
+
+def parse_sbi_page(html: str, fetched_at: Optional[datetime] = None) -> ExchangeRate:
+    """SBI LY HOUR Bank: the USD/KHR row is "USD/KHR | Note Buy | Note Sell | Transfer Buy | Transfer Sell".
+
+    SBI labels its columns the opposite way round to the other banks (its "Sell" is the lower
+    figure). The owner chose SBI's "Sell" figure; it is stored as `buy_rate` because that is the
+    field the rates card shows for every bank. SBI's "Buy" figure is kept as `sell_rate`.
+    Note figures are used; Transfer figures when a Note cell is "-".
+    """
+    text, rows = _page_content(html)
+    effective = re.search(r"as of\s+([A-Za-z]+\s+\d{1,2},?\s+\d{4})", text, re.IGNORECASE)
+    if not effective:
+        raise ValueError("SBI exchange-rate effective date was not found")
+    for row in rows:
+        if not row or re.sub(r"\s+", "", row[0]).upper() != "USD/KHR":
+            continue
+        cells = [_collapse(cell) for cell in row[1:5]]
+        if len(cells) < 4:
+            break
+
+        def pick(note: str, transfer: str) -> Decimal:
+            for value in (note, transfer):
+                if _NUMBER.fullmatch(value.replace("KHR", "").strip()):
+                    return _parse_number(value)
+            raise ValueError("SBI USD/KHR rate cell was empty")
+
+        sell = pick(cells[1], cells[3])
+        buy = pick(cells[0], cells[2])
+        for value in (sell, buy):
+            if not SBI_RATE_MIN <= value <= SBI_RATE_MAX:
+                raise ValueError(f"SBI USD/KHR rate out of range: {value}")
+        return _rate("SBI", "Notes", buy_rate=sell, sell_rate=buy,
+                     effective_at=effective.group(1), fetched_at=fetched_at)
+    raise ValueError("SBI USD/KHR rates were not found")
+
+
 _PARSERS: dict[str, Callable[[str, Optional[datetime]], ExchangeRate]] = {
     "NBC": parse_nbc_page,
     "ACLEDA": parse_acleda_page,
     "WING": parse_wing_page,
+    "SBI": parse_sbi_page,
 }
 
 
@@ -474,7 +519,8 @@ def format_rate_display_values(
 
 
 def format_rate_row(source: str, rate: Optional[ExchangeRate], now: datetime) -> str:
-    labels = {"NBC": "NBC OFFICIAL", "ACLEDA": "ACLEDA NOTES", "WING": "WING TELEGRAPHIC TRANSFER OUTBOUND"}
+    labels = {"NBC": "NBC OFFICIAL", "ACLEDA": "ACLEDA NOTES", "WING": "WING TELEGRAPHIC TRANSFER OUTBOUND",
+              "SBI": "SBI LY HOUR NOTES"}
     label = labels.get(source, source)
     if rate is None or all(value is None for value in (rate.official_rate, rate.buy_rate, rate.sell_rate)):
         return f"{label}\nUNAVAILABLE"

@@ -61,9 +61,11 @@ RATE_ROW_COLORS = {
     "NBC": "#182438",
     "ACLEDA": "#193138",
     "WING": "#28243A",
+    "SBI": "#1C2540",
     "CNY": "#3A1E22",
 }
-RATE_TABLE_SOURCES = ("ACLEDA", "WING", "CNY")
+# Four equal rows since 2026-11-26 (SBI added below WING; card size unchanged).
+RATE_TABLE_SOURCES = ("ACLEDA", "WING", "SBI", "CNY")
 RATE_CARD_TITLE = "អត្រាប្តូរប្រាក់ ខ្មែរ ដុល្លារ និងចិន"
 # Narrow cards: two centred lines rather than an unreadably small single line.
 RATE_CARD_TITLE_TWO_LINES = "អត្រាប្តូរប្រាក់\nខ្មែរ ដុល្លារ និងចិន"
@@ -77,6 +79,10 @@ RATE_STATUS_FG = "#C9B87A"
 # Two columns since 2026-11-13: the sell column was removed for ACLEDA and WING.
 RATE_TABLE_HEADERS = ("ធនាគារ", "លុយដុល្លារដូរយកលុយរៀល")
 CNY_ROW_LABEL = "លុយយ័នចិន"
+# SBI LY HOUR Bank row (owner, 2026-11-26): Khmer name in Bokor; the yuan label uses Bokor too.
+SBI_ROW_LABEL = "លីហ៊ួរ"
+RATE_ROW_LABEL_FONT = "Bokor"
+KHMER_LABEL_ROWS = ("SBI", "CNY")
 # Payment-card identity boxes (owner-approved 2026-11-12): Khmer headings, text centred.
 SENDER_HEADING = "● បានទទួលប្រាក់ពីឈ្មោះ"
 BANK_HEADING = "▥ ផ្ទេរមកពីធនាគារ"
@@ -137,8 +143,10 @@ def format_gold_price(value: Decimal) -> str:
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 NBC_LOGO_PATH = ASSETS_DIR / "nbc_logo.png"
 NBC_LOGO_HEIGHTS = {False: 40, True: 30}
-BANK_LOGO_HEIGHTS = {False: 60, True: 44}
-BANK_LOGO_FILES = {"ACLEDA": "acleda_logo_{}.png", "WING": "wing_logo_{}.png", "CNY": "cny_logo_{}.png"}
+# 44 px (30 px on narrow layouts) since the 4th row: 60 px logos would make the card taller.
+BANK_LOGO_HEIGHTS = {False: 44, True: 30}
+BANK_LOGO_FILES = {"ACLEDA": "acleda_logo_{}.png", "WING": "wing_logo_{}.png", "SBI": "sbi_logo_{}.png",
+                   "CNY": "cny_logo_{}.png"}
 # Currency coin icons (green KHR ៛, gold USD $) shown before the payment amount.
 NOTE_HEIGHTS = (64, 60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 22)
 NOTE_TO_DIGIT_RATIO = 1.1
@@ -996,16 +1004,23 @@ class Dashboard:
             header.grid(row=0, column=column, sticky="nsew", pady=(0, 3))
             self.rate_table_headers[column] = header
 
+        self.rate_label_family = self._installed_font(RATE_ROW_LABEL_FONT, self.rate_group_font)
         source_details = (
             ("ACLEDA", "ACLEDA", "Notes"),
             ("WING", "WING", "TT outbound"),
+            ("SBI", SBI_ROW_LABEL, "Sell"),
         )
         for index, (source, name, category) in enumerate(source_details, start=1):
-            table.grid_rowconfigure(index, weight=1)
+            # One uniform group: all four rows always share the card's height equally.
+            table.grid_rowconfigure(index, weight=1, uniform="rate_rows")
             tint = RATE_ROW_COLORS[source]
             bank_cell = tk.Frame(table, bg=tint, padx=6, highlightthickness=0)
             bank_cell.grid(row=index, column=0, sticky="nsew", pady=2)
-            bank_label = self._label(bank_cell, name, size=10, color="text", weight="bold", anchor="center")
+            if source == "SBI":
+                bank_label = self._label(bank_cell, name, size=10, color="text", family=self.rate_label_family,
+                                         anchor="center")
+            else:
+                bank_label = self._label(bank_cell, name, size=10, color="text", weight="bold", anchor="center")
             bank_label.pack(anchor="center", pady=(4, 0))
             logo = self._bank_logos.get(source, {}).get(False)
             if logo is not None:
@@ -1044,12 +1059,13 @@ class Dashboard:
         self._rate_pulse_after_id = self.root.after(0, self._tick_rate_pulse)
 
     def _build_cny_row(self, table, row: int) -> None:
-        """Third row: the official USD/CNY central rate (one midpoint), labelled លុយយ័នចិន."""
-        table.grid_rowconfigure(row, weight=1)
+        """Last row: the official USD/CNY central rate (one midpoint), labelled លុយយ័នចិន (Bokor)."""
+        table.grid_rowconfigure(row, weight=1, uniform="rate_rows")
         tint = RATE_ROW_COLORS["CNY"]
         bank_cell = tk.Frame(table, bg=tint, padx=6, highlightthickness=0)
         bank_cell.grid(row=row, column=0, sticky="nsew", pady=2)
-        bank_label = self._label(bank_cell, CNY_ROW_LABEL, size=10, color="text", family=self.rate_group_font, anchor="center")
+        bank_label = self._label(bank_cell, CNY_ROW_LABEL, size=10, color="text", family=self.rate_label_family,
+                                 anchor="center")
         bank_label.pack(anchor="center", pady=(4, 0))
         logo = self._bank_logos.get("CNY", {}).get(False)
         if logo is not None:
@@ -2189,14 +2205,15 @@ class Dashboard:
             pass
 
     def _fit_rate_figures(self) -> None:
-        """Each rate fills its own cell (largest size that fits); every arrow matches the yuan arrow size."""
+        """All four rates share one size: the largest that fits every row (owner, 2026-11-26).
+
+        Every arrow matches the yuan arrow size.
+        """
         self._fit_rate_headers()
         self._fit_cny_label()
         cny = self.rate_display_labels.get("CNY")
         cny_size = self._fit_cny_figure() if cny is not None else None
-        arrow_size = max(7, (cny_size or 18) * 11 // 20)
-        arrow_font = tkfont.Font(root=self.root, family="Segoe UI", size=arrow_size, weight="bold")
-        arrow_width = arrow_font.measure("▲") + 4
+        bank_rows = []
         for source, labels in self.rate_display_labels.items():
             if source == "CNY":
                 continue
@@ -2205,17 +2222,36 @@ class Dashboard:
             if width <= 1 or height <= 1:
                 continue
             text = figure.cget("text")
-            text = text if text not in {"", "—"} else "4,444"
-            size = CNY_FIGURE_MAX_SIZE
-            while size > 9:
-                font = tkfont.Font(root=self.root, family=self.figure_font, size=size, weight="bold")
-                if font.measure(text) + arrow_width <= width - 16 and font.metrics("linespace") <= height - 8:
-                    break
-                size -= 1
-            key = (size, arrow_size)
+            bank_rows.append((labels, text if text not in {"", "—"} else "4,444", width, height))
+
+        def bank_fit(arrow_width: int) -> int:
+            best = CNY_FIGURE_MAX_SIZE
+            for _labels, text, width, height in bank_rows:
+                size = best
+                while size > 9:
+                    font = tkfont.Font(root=self.root, family=self.figure_font, size=size, weight="bold")
+                    if font.measure(text) + arrow_width <= width - 16 and font.metrics("linespace") <= height - 8:
+                        break
+                    size -= 1
+                best = min(best, size)
+            return best
+
+        def arrow_for(size: int) -> tuple[int, int]:
+            arrow_size = max(7, size * 11 // 20)
+            return arrow_size, tkfont.Font(root=self.root, family="Segoe UI", size=arrow_size, weight="bold").measure("▲") + 4
+
+        common = cny_size or 18
+        if bank_rows:
+            common = min(common, bank_fit(arrow_for(common)[1]))
+        if cny_size is not None and common < cny_size:
+            cny_size = self._fit_cny_figure(limit=common)  # the yuan figure follows the common size
+            common = min(common, cny_size or common)
+        arrow_size, _arrow_width = arrow_for(common)
+        for labels, _text, _width, _height in bank_rows:
+            key = (common, arrow_size)
             if labels.get("fit_key") != key:
                 labels["fit_key"] = key
-                figure.configure(font=self._font(size, "bold", self.figure_font))
+                labels["buy"].configure(font=self._font(common, "bold", self.figure_font))
                 labels["buy_arrow"].configure(font=self._font(arrow_size, "bold"))
 
     def _fit_rate_headers(self) -> None:
@@ -2234,8 +2270,8 @@ class Dashboard:
                 header._fit_size = size
                 header.configure(font=self._font(size, "normal", self.rate_group_font))
 
-    def _fit_cny_figure(self) -> Optional[int]:
-        """Grow the lone USD/CNY figure to the largest size that fits its cell; returns the size."""
+    def _fit_cny_figure(self, limit: Optional[int] = None) -> Optional[int]:
+        """Grow the USD/CNY figure to the largest size that fits its cell (at most `limit`); returns it."""
         cny = self.rate_display_labels.get("CNY")
         if cny is None:
             return None
@@ -2245,7 +2281,7 @@ class Dashboard:
             return None
         text = cny["official"].cget("text")
         text = text if text not in {"", "—"} else CNY_FIGURE_SAMPLE
-        size = CNY_FIGURE_MAX_SIZE
+        size = min(CNY_FIGURE_MAX_SIZE, limit) if limit else CNY_FIGURE_MAX_SIZE
         while size > 12 and not self._cny_fits(size, text, width, height):
             size -= 1
         key = (size, width, height)
@@ -2267,24 +2303,31 @@ class Dashboard:
         arrow_font = tkfont.Font(root=self.root, family="Segoe UI", size=small, weight="bold")
         caption_font = tkfont.Font(root=self.root, family="Segoe UI", size=max(7, size // 4))
         line_width = figure_font.measure(text) + 3 + small_font.measure("¥") + 4 + arrow_font.measure("▲")
-        line_height = figure_font.metrics("linespace") + caption_font.metrics("linespace")
-        return line_width <= width - 16 and line_height <= height - 8
+        # Each Tk label adds its border and padding above and below its text (2 × (2 + 1) px).
+        label_chrome = 6
+        line_height = figure_font.metrics("linespace") + caption_font.metrics("linespace") + 2 * label_chrome
+        return line_width <= width - 16 and line_height <= height - 4  # the cell's 2 px border, top and bottom
 
     def _fit_cny_label(self) -> None:
-        """លុយយ័នចិន is longer than the bank names: shrink it (never the cell) to fit its column."""
-        cny = self.rate_display_labels.get("CNY")
-        if cny is None or cny["row"].winfo_width() <= 1:
+        """The Khmer row names (លីហ៊ួរ, លុយយ័នចិន) in Bokor, one common size that fits both cells."""
+        rows = [self.rate_display_labels[s] for s in KHMER_LABEL_ROWS if s in self.rate_display_labels]
+        if not rows or rows[0]["row"].winfo_width() <= 1:
             return
+        family = getattr(self, "rate_label_family", self.rate_group_font)
         narrow = bool(self._rate_group_narrow)
-        available = cny["row"].winfo_width() - 2 * int(cny["row"].cget("padx")) - 2
         size = 8 if narrow else 12
-        while size > 6 and tkfont.Font(root=self.root, family=self.rate_group_font, size=size).measure(
-            cny["bank"].cget("text")
-        ) + 2 * int(cny["bank"].cget("padx")) > available:
+
+        def fits(labels, size):
+            available = labels["row"].winfo_width() - 2 * int(labels["row"].cget("padx")) - 2
+            width = tkfont.Font(root=self.root, family=family, size=size).measure(labels["bank"].cget("text"))
+            return width + 2 * int(labels["bank"].cget("padx")) <= available
+
+        while size > 6 and not all(fits(labels, size) for labels in rows):
             size -= 1
         if getattr(self, "_cny_label_size", None) != size:
             self._cny_label_size = size
-            cny["bank"].configure(font=self._font(size, "normal", self.rate_group_font))
+            for labels in rows:
+                labels["bank"].configure(font=self._font(size, "normal", family))
 
     def _fit_history_height(self) -> None:
         """Let the recent-payments list use the space left under the payment card."""

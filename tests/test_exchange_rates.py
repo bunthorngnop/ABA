@@ -310,3 +310,52 @@ def test_monitor_saves_the_cny_parity_with_the_bank_rates(tmp_path, monkeypatch)
         assert rates["CNY"].trend("official") == "down"  # previous value kept for the arrow
     finally:
         store.close()
+
+
+SBI_PAGE = """
+<main>
+  <h2>Foreign Exchange</h2>
+  <table>
+    <tr><th>The Exchange Rate as of November 26, 2026</th></tr>
+    <tr><th>Currency</th><th>Note</th><th>International Transfer</th></tr>
+    <tr><th>Buy</th><th>Sell</th><th>Buy</th><th>Sell</th></tr>
+    <tr><td>USD/CNY</td><td>-</td><td>-</td><td>6.76</td><td>6.57</td></tr>
+    <tr><td>USD/KHR</td><td>4,072</td><td>4,056</td><td>4,070</td><td>4,058</td></tr>
+    <tr><td>THB/KHR</td><td>118.86</td><td>118.39</td><td>-</td><td>-</td></tr>
+  </table>
+</main>
+"""
+
+
+def test_sbi_page_shows_only_sbis_sell_figure():
+    """Owner, 2026-11-26: the SBI row shows SBI's USD/KHR "Sell" figure (Note), 4,056 that day."""
+    from app.exchange_rates import RATE_SOURCES, parse_sbi_page
+
+    rate = parse_sbi_page(SBI_PAGE, datetime(2026, 11, 26, 9, 0, tzinfo=CAMBODIA_TIMEZONE))
+    assert rate.source == "SBI" and rate.category == "Notes"
+    assert rate.buy_rate == Decimal("4056")  # the field the rates card shows
+    assert rate.sell_rate == Decimal("4072")  # SBI's "Buy" figure, kept but not shown
+    assert rate.effective_at == "November 26, 2026"
+    sbi = next(source for source in RATE_SOURCES if source.key == "SBI")
+    assert sbi.url == "https://www.sbibank.com.kh/en/resources/foreign-exchange"
+
+
+def test_sbi_uses_transfer_figures_when_note_cells_are_blank():
+    from app.exchange_rates import parse_sbi_page
+
+    page = SBI_PAGE.replace("<td>4,072</td><td>4,056</td>", "<td>-</td><td>-</td>")
+    rate = parse_sbi_page(page)
+    assert (rate.buy_rate, rate.sell_rate) == (Decimal("4058"), Decimal("4070"))
+
+
+def test_sbi_page_problems_are_errors_not_wrong_numbers():
+    import pytest
+
+    from app.exchange_rates import parse_sbi_page
+
+    with pytest.raises(ValueError):
+        parse_sbi_page(SBI_PAGE.replace("as of November 26, 2026", ""))  # no date
+    with pytest.raises(ValueError):
+        parse_sbi_page(SBI_PAGE.replace("USD/KHR", "USD/XYZ"))  # no USD/KHR row
+    with pytest.raises(ValueError):
+        parse_sbi_page(SBI_PAGE.replace("4,056", "40.56"))  # out of range
