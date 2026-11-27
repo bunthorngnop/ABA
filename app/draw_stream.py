@@ -14,7 +14,7 @@ used instead. Only DRAW_STREAM_URL and CAMBODIAN_STREAM_URL are ever opened.
 Two channels (owner decision 2026-11-22): the Vietnamese channel Xổ Số Minh Ngọc for the 16:00 and
 18:00 draws, and the Cambodian channel ផ្ទះ ឆ្នោតយួន for the 10:00, 13:00 and 19:00 draws. Full
 results are at half past the hour (about 5 minutes earlier on Tuesdays and Thursdays), so one window
-from :15 to :45 covers every day. The Cambodian channel sometimes goes live late; while its page is
+from :05 to :45 covers every day (Cambodian windows start at :05 since 2026-11-27). The Cambodian channel sometimes goes live late; while its page is
 not showing that hour's live video, ABA reopens it every minute.
 """
 
@@ -51,11 +51,11 @@ class DrawWindow:
 
 # Cambodia time, every day.
 DRAW_WINDOWS = (
-    DrawWindow(time(10, 15), time(10, 45), CAMBODIAN_STREAM_URL, 10, True),
-    DrawWindow(time(13, 15), time(13, 45), CAMBODIAN_STREAM_URL, 13, True),
+    DrawWindow(time(10, 5), time(10, 45), CAMBODIAN_STREAM_URL, 10, True),
+    DrawWindow(time(13, 5), time(13, 45), CAMBODIAN_STREAM_URL, 13, True),
     DrawWindow(time(16, 5), time(16, 40), DRAW_STREAM_URL, 16),
     DrawWindow(time(18, 5), time(18, 40), DRAW_STREAM_URL, 18),
-    DrawWindow(time(19, 15), time(19, 45), CAMBODIAN_STREAM_URL, 19, True),
+    DrawWindow(time(19, 5), time(19, 45), CAMBODIAN_STREAM_URL, 19, True),
 )
 LIVE_RELOAD_SECONDS = 60  # how often to reopen a page that is not showing the live video yet
 CHROME_PROFILE_NAME = "Bunthorng"  # the owner's Chrome profile with YouTube Premium
@@ -113,7 +113,23 @@ def parse_live_page(page: str) -> Optional[LiveVideo]:
     if match is None:
         return None
     title = _META_TITLE.search(page)
-    return LiveVideo(match.group(1), html.unescape(title.group(1)) if title else "", '"isLiveNow":true' in page)
+    return LiveVideo(match.group(1), html.unescape(title.group(1)) if title else "", _is_live_now(page))
+
+
+def _is_live_now(page: str) -> bool:
+    """Live when the page says isLiveNow, or its own videoDetails say isLive (and not upcoming).
+
+    Some live pages (seen on the Cambodian channel, 2026-11-27) carry no isLiveNow at all and
+    mark the stream only with "isLive":true inside videoDetails. Only that block is read, so a
+    different live video in the suggestions cannot count."""
+    if '"isLiveNow":true' in page:
+        return True
+    start = page.find('"videoDetails":{')
+    if start < 0:
+        return False
+    end = page.find('"microformat":', start)
+    details = page[start:end if end > start else start + 20_000]
+    return '"isLive":true' in details and '"isUpcoming":true' not in details
 
 
 def fetch_live_video(channel_url: str, timeout: float = 15.0) -> Optional[LiveVideo]:

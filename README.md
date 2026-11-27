@@ -199,11 +199,11 @@ Every day ABA opens the lottery draw live stream in Google Chrome app mode with 
 
 | Draw | Channel | Shown |
 |---|---|---|
-| 10:00 | ផ្ទះ ឆ្នោតយួន (Cambodian) `https://www.youtube.com/channel/UC1SVFPlK1ljQk-jdHgXB6qA/live` | 10:15–10:45 |
-| 13:00 | ផ្ទះ ឆ្នោតយួន | 13:15–13:45 |
+| 10:00 | ផ្ទះ ឆ្នោតយួន (Cambodian) `https://www.youtube.com/channel/UC1SVFPlK1ljQk-jdHgXB6qA/live` | 10:05–10:45 |
+| 13:00 | ផ្ទះ ឆ្នោតយួន | 13:05–13:45 |
 | 16:00 | Xổ Số Minh Ngọc (Vietnamese) `https://www.youtube.com/@xosominhngoc/live` | 16:05–16:40 |
 | 18:00 | Xổ Số Minh Ngọc | 18:05–18:40 |
-| 19:00 | ផ្ទះ ឆ្នោតយួន | 19:15–19:45 |
+| 19:00 | ផ្ទះ ឆ្នោតយួន | 19:05–19:45 |
 
 Results come at half past the hour, about 5 minutes earlier on Tuesdays and Thursdays; the windows cover both. The stream window is docked over the right half of the whole ABA window, top to bottom, kept on top (compensating Windows' invisible borders), and closed at the end of the window and when ABA exits. ABA closes only its own window, never the owner's other Chrome windows. The window shows **only the video player** (no comments or page text): ABA looks up the channel's current live video in the background and opens it inside a tiny page that ABA serves on this PC only (`http://127.0.0.1:<random port>/player?v=<video id>`). YouTube refuses its player when opened directly (Error 153), which is why the page is needed. The page sets the stream to **20% volume**, unmuted, every time (`DRAW_STREAM_VOLUME` in `app/draw_stream.py`); Windows and Chrome volume are not changed. If the lookup or the page fails, ABA opens the channel's normal live page instead. The Cambodian channel can go live late, so ABA opens it only once that hour's live has started (checked every minute). If someone closes the stream it is not reopened until the next window. The browser is a separate program, so a browser problem cannot stop payment announcements. Operations → CONTROLS has **TEST DRAW STREAM (60 s)** (Vietnamese channel).
 

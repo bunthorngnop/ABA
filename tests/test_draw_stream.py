@@ -82,14 +82,14 @@ def test_draw_windows_are_1605_to_1640_and_1805_to_1840():
 def test_vietnamese_channel_at_16_and_18_cambodian_channel_at_10_13_and_19():
     """Owner decision 2026-11-22."""
     expected = {
-        (10, 15): ("10:15-10:45", CAMBODIAN_STREAM_URL), (13, 15): ("13:15-13:45", CAMBODIAN_STREAM_URL),
+        (10, 5): ("10:05-10:45", CAMBODIAN_STREAM_URL), (13, 5): ("13:05-13:45", CAMBODIAN_STREAM_URL),
         (16, 5): ("16:05-16:40", DRAW_STREAM_URL), (18, 5): ("18:05-18:40", DRAW_STREAM_URL),
-        (19, 15): ("19:15-19:45", CAMBODIAN_STREAM_URL),
+        (19, 5): ("19:05-19:45", CAMBODIAN_STREAM_URL),
     }
     for (hour, minute), (label, url) in expected.items():
         window = draw_window_at(at(hour, minute))
         assert (window.label, window.url) == (label, url)
-    for hour, minute in ((10, 14), (10, 45), (13, 45), (17, 15), (19, 45), (8, 30), (20, 30)):
+    for hour, minute in ((10, 4), (13, 4), (19, 4), (10, 45), (13, 45), (17, 15), (19, 45), (8, 30), (20, 30)):
         assert draw_window_at(at(hour, minute)) is None
     assert CAMBODIAN_STREAM_URL == "https://www.youtube.com/channel/UC1SVFPlK1ljQk-jdHgXB6qA/live"
 
@@ -339,6 +339,27 @@ def test_live_page_gives_the_video_id_title_and_live_status():
     assert parse_live_page(MN_LIVE_PAGE.replace('"isLiveNow":true', '')).live_now is False  # an ended stream
     assert parse_live_page('<link rel="canonical" href="https://www.youtube.com/channel/UC1">') is None
     assert player_url("bWi0ebH0VB0") == "https://www.youtube.com/embed/bWi0ebH0VB0?autoplay=1&rel=0&playsinline=1"
+
+
+KH_HEAD = (
+    '<html><head><link rel="canonical" href="https://www.youtube.com/watch?v=NVONCG3yTnw">'
+    '<meta name="title" content="🔴LIVE ! លទ្ធផលឆ្នោតយួន | ម៉ោង 01:30 នាទី | ផ្ទះ ឆ្នោតយួន"></head>'
+)
+
+
+def test_live_page_without_is_live_now_uses_its_own_video_details():
+    """2026-11-27 13:00: the Cambodian live page had no isLiveNow, only videoDetails isLive."""
+    from app.draw_stream import parse_live_page
+
+    live_page = KH_HEAD + ('<script>{"videoDetails":{"videoId":"NVONCG3yTnw","lengthSeconds":"0",'
+                           '"isLive":true,"isLiveContent":true},"microformat":{}}</script></html>')
+    assert parse_live_page(live_page).live_now is True
+    upcoming = live_page.replace('"isLive":true', '"isUpcoming":true')
+    assert parse_live_page(upcoming).live_now is False
+    # A live video among the suggestions (outside videoDetails) does not count.
+    ended = KH_HEAD + ('<script>{"videoDetails":{"videoId":"NVONCG3yTnw","isLiveContent":true},'
+                       '"microformat":{},"related":{"isLive":true}}</script></html>')
+    assert parse_live_page(ended).live_now is False
 
 
 def test_opens_the_player_only_page_of_the_live_video():
